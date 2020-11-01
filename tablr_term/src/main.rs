@@ -11,31 +11,36 @@ fn main() {
     print_table(&state);
     print_prompt(&state);
     loop {
-        match read(&state) {
+        match read() {
             Some(Command::Quit)=>break,
             Some(cmd)=>{
                 eval(&mut state, cmd);
                 print_prompt(&state);
             },
-            None=>(),
+            None=> print_prompt(&state),
         }
     }
     
 }
 
-fn read(state: &TablrState) -> Option<Command> {
+fn read() -> Option<Command> {
     let mut buffer = String::new();
     match stdin().read_line(&mut buffer){
         Ok(_sz)=> {
-            match parse_command(buffer.trim_end_matches("\r\n")) {
-                Ok((_i,cmd))=>Some(cmd),
-                Err(err) => {println!("{}",err); None},
+            let s =buffer.trim_end_matches("\r\n");
+            if s.is_empty() {
+                None
+            } else {
+                match parse_command(s) {
+                    Ok((_i,cmd))=>Some(cmd),
+                    Err(err) => {println!("{}",err); None},
+                }
             }
         },
         Err(err) => {
             println!("{}",err); 
-            print_prompt(state);
-        None},
+            None
+        },
     }
     
 }
@@ -64,7 +69,6 @@ fn eval(state: &mut TablrState, c:Command){
                     Some(Some(s))=>println!("{}",s),
                     _ => println!("No formula"),
                 };
-                print_prompt(state);
             } else {
                 let r=state.runtime.set_formula_str(state.current_sheet, state.current_cell, &f);
                 print_table(&state);

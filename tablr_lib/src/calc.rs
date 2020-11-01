@@ -3,6 +3,7 @@ use crate::types::*;
 use crate::func::*;
 use crate::parse::*;
 use thiserror::Error;
+use std::fmt;
 
 type CellDependencies = HashMap<CellID,HashSet<CellID>>;
 type FunctionLibrary = HashMap<String, Box<dyn Function>>;
@@ -50,7 +51,7 @@ impl Runtime {
         match os{
             None => Err(EvalError::InvalidSheetIndex(sheet_idx)),
             Some(sheet) => {
-                let t= format!("{:?}",formula);
+                let t= format!("{}",formula);
                 let deps = &mut self.dependencies;
 
                 runtime_check(&self.formulas,sheet, id, &formula)?;
@@ -133,6 +134,21 @@ impl Expr {
             Expr::Function{name:_name, args}=>args.iter().for_each(|e| e.get_references(v)),
             _ => (),
         }
+    }
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Reference(id)=> write!(f, "{}",id),
+            Expr::Range{from,to} => write!(f, "{}:{}",from,to),
+            Expr::Function{name, args}=>{
+                let argument_string=args.iter().map(|e| format!("{}",e)).collect::<Vec<String>>().join(",");
+                write!(f,"{}({})",name,argument_string)
+            },
+            Expr::Value(val)=> write!(f, "{}",val),
+        }
+       
     }
 }
 
