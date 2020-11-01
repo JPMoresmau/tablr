@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "tablr_lib",
+    "tablr_term",
+]

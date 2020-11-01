@@ -1,0 +1,13 @@
+[package]
+name = "tablr_term"
+version = "0.1.0"
+authors = ["JP Moresmau <jp@moresmau.fr>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tablr_lib = {path="../tablr_lib"}
+prettytable-rs = "^0.8"
+nom = "6"
+chrono = "*"
