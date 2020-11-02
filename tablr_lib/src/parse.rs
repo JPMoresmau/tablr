@@ -2,10 +2,11 @@ use crate::calc::*;
 use crate::types::*;
 
 use nom::{
+    error::ParseError,
     IResult,
     branch::alt,
     bytes::complete::{tag, take_while1, escaped_transform},
-    character::complete::{none_of,char, digit1},
+    character::complete::{none_of,char, digit1,space0},
     combinator::map,
     multi::separated_list0,
     number::complete::{double},
@@ -13,7 +14,7 @@ use nom::{
   };
 
 pub fn parse_expr(input: &str) -> IResult<&str, Expr> {
-    alt((parse_range,parse_ref,parse_func,parse_value))(input)
+    alt((parse_range,parse_ref,parse_func,parse_value))(space0(input)?.0)
 }
 
 fn parse_ref(input: &str) -> IResult<&str, Expr> {
@@ -31,7 +32,7 @@ pub fn parse_id(input: &str) -> IResult<&str, CellID> {
     let (input, rows) = take_while1(|c:char| c.is_ascii_digit())(input)?;
     for c in rows.chars() {
         let d = c.to_digit(10).unwrap();
-        row=row*10 +d as u128;
+        row=row*10 +d as usize;
     }
     Ok((input,CellID{col:col-1, row:row-1}))
 }
@@ -43,12 +44,21 @@ fn parse_range(input: &str) -> IResult<&str, Expr> {
 
 fn parse_func(input: &str) -> IResult<&str, Expr> {
     let name_parser = take_while1(|c: char| c.is_alphanumeric());
-    let args_parser = separated_list0(tag(","), parse_expr);
-    let (input, (name,args)) = tuple((name_parser,delimited(tag("("), args_parser, tag(")"))))(input)?;
+    let args_parser = separated_list0(spaced(","), parse_expr);
+    let (input, (name,args)) = tuple((name_parser,delimited(spaced("("), args_parser, spaced(")"))))(input)?;
 
-    Ok((input,Expr::Function{name:name.to_string(),args}))
+    Ok((input,Expr::Function{name:name.to_string().to_uppercase(),args}))
 }
 
+fn spaced<'a, Error: ParseError<&'a str>>(txt: &'a str) -> impl Fn(&'a str) -> IResult<&'a str,&'a str, Error> {
+    //tag(txt)
+    move |input| {
+        let (input,_)=space0(input)?;
+        let (input,t)=tag(txt)(input)?;
+        let (input,_)=space0(input)?;
+        Ok((input,t))
+    }
+}
 
 fn parse_value(input: &str) -> IResult<&str, Expr> {
     alt((parse_true,parse_false,parse_int, parse_float,parse_string))(input)
@@ -124,7 +134,9 @@ mod tests {
     #[test]
     fn test_parse_function(){
         assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}]})), parse_func("SUM(A1:B3)"));
-        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:2,col:1})]})), parse_func("SUM(A1,B3)"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:2,col:1})]})), parse_func("sum(A1,B3)"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:2,col:1})]})), parse_func("sum ( A1,  B3 ) "));
+        
         assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![]})), parse_func("SUM()"));
 
         assert!(parse_func("SUM").is_err());
@@ -145,7 +157,7 @@ mod tests {
     fn test_parse_expr(){
         assert_eq!(Ok(("",Expr::Reference(CellID{row:0,col:0}))), parse_expr("A1"));
         assert_eq!(Ok(("",Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}})), parse_expr("A1:B3"));
-        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}]})), parse_expr("SUM(A1:B3)"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}]})), parse_expr("  SUM( A1:B3 )"));
         assert_eq!(Ok(("",Expr::Value(CellValue::Text("ab\ncd".to_string())))),parse_expr(r#""ab\ncd""#));
     }
 }

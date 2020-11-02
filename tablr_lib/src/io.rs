@@ -55,7 +55,7 @@ pub fn save_csv_writer<W: Write>(sheet: &Sheet, w: W) -> Result<(),IOError> {
                 None =>String::new(),
             });
         }
-        wtr.write_record(&row).map_err(|e| IOError::WriteCSVError(e))?;
+        wtr.write_record(&row).map_err( IOError::WriteCSVError)?;
     }
     Ok(())
 }
@@ -72,9 +72,9 @@ pub fn load_csv<P: AsRef<Path>+Display>(path:&P, desc: &InputDescription) -> Res
     let mut rdr = ReaderBuilder::new().has_headers(false).flexible(true).from_path(path).map_err(|e| IOError::OpenCSVError(format!("{}",path),e))?;
     let mut sheet = Sheet::new();
     sheet.metadata.headers=desc.headers;
-    let mut row = 0;
+    
     let def = CellValue::Text(String::new());
-    for result in rdr.records() {
+    for (row,result) in rdr.records().enumerate() {
         let record: StringRecord = result.map_err(|e| IOError::DeserializeCSVError(format!("{}", path),e))?;
         for (col,field) in record.iter().enumerate(){
             let id = CellID{col,row};
@@ -92,7 +92,6 @@ pub fn load_csv<P: AsRef<Path>+Display>(path:&P, desc: &InputDescription) -> Res
             };
             sheet.set_cell_value(&id, cell_value);
         }
-        row+=1;
     }
     Ok(sheet)
 }

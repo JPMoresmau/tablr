@@ -16,6 +16,8 @@ pub struct Runtime {
     functions: FunctionLibrary,
 }
 
+type SetResult = Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError>;
+
 impl Runtime {
     pub fn new() -> Self {
         Runtime {
@@ -26,7 +28,7 @@ impl Runtime {
         }
     }
 
-    pub fn set_value(&mut self, sheet_idx: usize, id: CellID, value: CellValue) -> Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError> {
+    pub fn set_value(&mut self, sheet_idx: usize, id: CellID, value: CellValue) -> SetResult {
         let os = self.workbook.sheets.get_mut(sheet_idx);
         match os{
             None => Err(EvalError::InvalidSheetIndex(sheet_idx)),
@@ -34,7 +36,7 @@ impl Runtime {
         }
     }
 
-    pub fn set_formula_str(&mut self, sheet_idx: usize, id: CellID, formula: &str) -> Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError> {
+    pub fn set_formula_str(&mut self, sheet_idx: usize, id: CellID, formula: &str) -> SetResult {
         match parse_expr(formula){
             Ok((rest,expr)) => 
                 if rest.is_empty() {
@@ -46,7 +48,7 @@ impl Runtime {
         }
     }
 
-    pub fn set_formula(&mut self, sheet_idx: usize, id: CellID, formula: Expr) -> Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError> {
+    pub fn set_formula(&mut self, sheet_idx: usize, id: CellID, formula: Expr) -> SetResult {
         let os = self.workbook.sheets.get_mut(sheet_idx);
         match os{
             None => Err(EvalError::InvalidSheetIndex(sheet_idx)),
@@ -71,7 +73,7 @@ impl Runtime {
                 
                 let mut refs=HashSet::new();
                 formula.get_references(&mut refs);
-                refs.iter().for_each(|cid| {deps.entry(*cid).or_insert(HashSet::new()).insert(id);});
+                refs.iter().for_each(|cid| {deps.entry(*cid).or_insert_with(HashSet::new).insert(id);});
 
                 let new_value =runtime_sheet_eval(&self.functions, sheet, &formula)?;
 
@@ -82,6 +84,12 @@ impl Runtime {
 
     pub fn eval(&self, sheet_idx: usize, expr: &Expr) -> Result<CellValue,EvalError> {
         runtime_eval(self, sheet_idx, expr)
+    }
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Runtime::new()
     }
 }
 
@@ -129,7 +137,7 @@ pub enum Expr {
 impl Expr {
     pub fn get_references(&self, v: &mut HashSet<CellID>) {
         match self {
-            Expr::Reference(id)=> {v.insert(id.clone());},
+            Expr::Reference(id)=> {v.insert(*id);},
             Expr::Range{from,to} => range_ids(from,to).into_iter().for_each(|id| {v.insert(id);}),
             Expr::Function{name:_name, args}=>args.iter().for_each(|e| e.get_references(v)),
             _ => (),
@@ -161,7 +169,7 @@ fn runtime_check(formula_cache: &FormulaCache, sheet: &Sheet, id: CellID, expr: 
     let mut previous_ids=vec![];
     previous_ids.push(id);
     for cid in s.iter() {
-        previous_ids.push(cid.clone());
+        previous_ids.push(*cid);
         cycle_check(formula_cache, sheet, &cid, &mut previous_ids)?;
         previous_ids.pop();
     }
@@ -175,10 +183,10 @@ fn cycle_check(formula_cache: &FormulaCache, sheet: &Sheet, id: &CellID, previou
             expr.get_references(&mut s);
             for cid in s.iter() {
                 if previous_ids.contains(cid){
-                    previous_ids.push(cid.clone());
+                    previous_ids.push(*cid);
                     return Err(EvalError::CycleDetected(previous_ids.clone()));
                 } else {
-                    previous_ids.push(cid.clone());
+                    previous_ids.push(*cid);
                     cycle_check(formula_cache, sheet, cid, previous_ids)?;
                     previous_ids.pop();
                 }
@@ -207,7 +215,7 @@ pub enum EvalError {
 
 fn runtime_eval(runtime: &Runtime, sheet_idx: usize, expr: &Expr) -> Result<CellValue,EvalError> {
     match runtime.workbook.sheets.get(sheet_idx){
-        None => return Err(EvalError::InvalidSheetIndex(sheet_idx)),
+        None => Err(EvalError::InvalidSheetIndex(sheet_idx)),
         Some(sheet) => runtime_sheet_eval(&runtime.functions, sheet, expr),
     }
 }
@@ -223,7 +231,7 @@ fn runtime_sheet_eval(functions: &FunctionLibrary, sheet: &Sheet, expr: &Expr) -
    
 }
 
-fn apply_function(functions: &FunctionLibrary, sheet: &Sheet, name: &str, args: &Vec<Expr>) -> Result<CellValue,EvalError> {
+fn apply_function(functions: &FunctionLibrary, sheet: &Sheet, name: &str, args: &[Expr]) -> Result<CellValue,EvalError> {
     if let Some(f)= functions.get(name) {
         let mut params = vec![];
         args.iter().try_for_each(|a| match a {
@@ -242,7 +250,7 @@ fn apply_function(functions: &FunctionLibrary, sheet: &Sheet, name: &str, args: 
                 }
             },
         })?;
-        f.calculate(params).map_err(|e| EvalError::EvalFunctionError(e))
+        f.calculate(params).map_err(EvalError::EvalFunctionError)
     } else {
         Err(EvalError::UnknownFunction(name.to_string()))
     }
