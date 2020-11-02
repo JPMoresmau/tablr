@@ -10,7 +10,7 @@ use chrono::{DateTime,FixedOffset, ParseError};
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct CellID {
     pub col: usize,
-    pub row: u128,
+    pub row: usize,
 }
 
 pub fn column_name(col: usize) -> String {
@@ -39,7 +39,7 @@ pub enum CellIDParseError{
     #[error("Unexpected character: {0}")]
     Unexpected(char),
     #[error("Invalid row: {0}")]
-    InvalidRow(u128),
+    InvalidRow(usize),
     #[error("Invalid column: {0}")]
     InvalidCol(usize),
 }
@@ -61,7 +61,7 @@ impl FromStr for CellID {
             } 
             if !incol {
                 if let Some(d)=c.to_digit(10) {
-                    row=row*10 +d as u128;
+                    row=row*10 +d as usize;
                 } else {
                     return Err(CellIDParseError::Unexpected(c));
                 }
@@ -223,13 +223,13 @@ impl Sheet {
     }
 
     pub fn set_cell_value(&mut self, id: &CellID, value: CellValue) {
-        let myid=id.clone();
+        let myid=*id;
         self.cells.0.entry(myid).or_insert(Cell{id:myid,value:CellValue::Empty,formula:None}).value=value;
         self.calc_size(id);
     }
 
     pub fn set_cell(&mut self, cell: Cell) -> CellID {
-        let id = cell.id.clone();
+        let id = cell.id;
         self.cells.0.insert(cell.id,cell);
         self.calc_size(&id);
         id
@@ -251,6 +251,11 @@ impl Sheet {
     }
 }
 
+impl Default for Sheet {
+    fn default() -> Self {
+        Sheet::new()
+    }
+}
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Workbook {
@@ -268,11 +273,17 @@ impl Workbook {
     } 
 }
 
+impl Default for Workbook {
+    fn default() -> Self {
+        Workbook::new()
+    }
+}
+
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub struct Metadata {
     pub name: String,
-    pub headers: u128, 
-    size: (usize,u128),
+    pub headers: usize, 
+    size: (usize,usize),
 }
 
 
@@ -284,14 +295,18 @@ impl Metadata {
             size:(0,0)}
     }
 
-    pub fn size(&self) -> (usize,u128) {
+    pub fn size(&self) -> (usize,usize) {
         self.size
     }
 }
 
-
+impl Default for Metadata {
+    fn default() -> Self {
+        Metadata::new()
+    }
+}
 pub struct InputDescription {
-    pub headers: u128,
+    pub headers: usize,
     pub template: Vec<CellValue>,
 }
 
