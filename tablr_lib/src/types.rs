@@ -5,13 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde::ser::{Serializer, SerializeSeq};
 use serde::de::{Deserializer, Visitor, SeqAccess};
 use thiserror::Error;
-use chrono::{DateTime,FixedOffset, ParseError};
-
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
-pub struct CellID {
-    pub col: usize,
-    pub row: usize,
-}
+use chrono::{DateTime,Local, ParseError};
 
 pub fn column_name(col: usize) -> String {
     let mut c = col;
@@ -26,6 +20,32 @@ pub fn column_name(col: usize) -> String {
     }
     v.reverse();
     v.iter().collect::<String>()
+}
+
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+pub struct CellID {
+    pub col: usize,
+    pub row: usize,
+}
+
+impl CellID {
+    pub fn next_row(&self) -> CellID {
+        let nr=if self.row==std::usize::MAX {
+                0
+            } else {
+                self.row+1
+            };
+        CellID{col:self.col,row:nr}
+    }
+
+    pub fn next_col(&self) -> CellID {
+        let nc=if self.col==std::usize::MAX {
+                0
+            } else {
+                self.col+1
+            };
+        CellID{col:nc,row:self.row}
+    }
 }
 
 impl fmt::Display for CellID {
@@ -111,8 +131,8 @@ pub enum CellValue {
     Integer(i128),
     Float(f64),
     Boolean(bool),
-    TimeStamp(DateTime<FixedOffset>),
-    Date(DateTime<FixedOffset>),
+    TimeStamp(DateTime<Local>),
+    Date(DateTime<Local>),
     Empty,
 }
 
@@ -125,7 +145,7 @@ impl fmt::Display for CellValue {
             CellValue::Boolean(b)=>write!(f, "{}",b),
             CellValue::Empty=>write!(f, ""),
             CellValue::TimeStamp(dt)=>write!(f, "{}",dt.to_rfc3339()),
-            CellValue::Date(dt)=>write!(f, "{}",dt.format("%F%z")),
+            CellValue::Date(dt)=>write!(f, "{}",dt.format("%F%:z")),
         }
         
     }

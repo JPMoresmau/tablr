@@ -27,7 +27,7 @@ fn read() -> Option<Command> {
     let mut buffer = String::new();
     match stdin().read_line(&mut buffer){
         Ok(_sz)=> {
-            let s =buffer.trim_end_matches("\r\n");
+            let s =buffer.trim_end_matches("\n").trim_end_matches("\r");
             if s.is_empty() {
                 None
             } else {
@@ -45,11 +45,41 @@ fn read() -> Option<Command> {
     
 }
 
+fn with_extension(mut path: String) -> String {
+    if !path.ends_with(".tablr"){
+        path.push_str(".tablr");
+    }
+    path
+}
+
 fn eval(state: &mut TablrState, c:Command){
     match c {
         Command::Quit=>(),
-        Command::Load(path)=>(),
-        Command::Save(path)=>(),
+        Command::Load(path)=>{
+            let path =with_extension(path);
+            state.path=Some(path.clone());
+            match load(&path) {
+                Ok(wk)=>{
+                    let vr=state.runtime.load(wk);
+                    print_table(&state);
+                    vr.iter().for_each(|r| print_errors(r));
+                },
+                Err(err)=> println!("Load error: {}",err),
+            }
+        },
+        Command::Save(path)=>{
+            let npath = path.map(with_extension).or(state.path.take());
+            match npath {
+                None=>println!("No path provided"),
+                Some(p)=> {
+                    state.path=Some(p.clone());
+                    match save(&state.runtime.workbook, &p){
+                        Ok(_)=> println!("Saved to {}",p),
+                        Err(err)=> println!("Save error: {}",err),
+                    }
+                },
+            }
+        },
         Command::Help=>println!("{}",HELP),
         Command::Error(err)=>{
             println!("Error parsing value: {}",err);
@@ -59,8 +89,11 @@ fn eval(state: &mut TablrState, c:Command){
         },
         Command::SetValue(cv)=> {
             let r=state.runtime.set_value(state.current_sheet, state.current_cell,cv);
+            if setresult_ok(&r){
+                state.current_cell=state.current_cell.next_row();
+            }
             print_table(&state);
-            print_errors(r);
+            print_errors(&r);
         },
         Command::SetFormula(f)=> {
             if f.is_empty(){
@@ -71,8 +104,11 @@ fn eval(state: &mut TablrState, c:Command){
                 };
             } else {
                 let r=state.runtime.set_formula_str(state.current_sheet, state.current_cell, &f);
+                if setresult_ok(&r){
+                    state.current_cell=state.current_cell.next_row();
+                }
                 print_table(&state);
-                print_errors(r);
+                print_errors(&r);
             }
         },
     }
@@ -95,8 +131,16 @@ fn print_prompt(state: &TablrState){
     let _=stdout().flush();
 }
 
-fn print_errors(r: Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError>){
-
+fn print_errors(r: &SetResult){
+    match r {
+        Err(err) => println!("{}",err),
+        Ok(v) => v.iter().for_each(|(c,rc)|{
+            match rc {
+                Err(err) => println!("{}: {}",c,err),
+                Ok(_cv)=>(),
+            }
+        }),
+    }
 }
 
 struct TablrState {

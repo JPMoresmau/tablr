@@ -16,7 +16,14 @@ pub struct Runtime {
     functions: FunctionLibrary,
 }
 
-type SetResult = Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError>;
+pub type SetResult = Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError>;
+
+pub fn setresult_ok(r: &SetResult) -> bool {
+    match r {
+        Err(_)=>false,
+        Ok(v)=>v.iter().all(|t| t.1.is_ok())
+    }
+}
 
 impl Runtime {
     pub fn new() -> Self {
@@ -84,6 +91,40 @@ impl Runtime {
 
     pub fn eval(&self, sheet_idx: usize, expr: &Expr) -> Result<CellValue,EvalError> {
         runtime_eval(self, sheet_idx, expr)
+    }
+
+    pub fn load(&mut self, workbook: Workbook) -> Vec<SetResult> {
+        self.workbook=workbook;
+        self.formulas.clear();
+        self.dependencies.clear();
+        let mut ret = vec![];
+        let deps = &mut self.dependencies;
+
+        for sheet in self.workbook.sheets.iter() {
+            let mut res= vec![];
+            for cell in sheet.cells.0.values() {
+                if let Some (f) = &cell.formula {
+                    if !self.formulas.contains_key(f){
+                        match parse_expr(f){
+                            Ok((rest,expr)) => 
+                                if rest.is_empty() {
+                                    let mut refs=HashSet::new();
+                                    expr.get_references(&mut refs);
+                                    
+                                    refs.iter().for_each(|cid| {deps.entry(*cid).or_insert_with(HashSet::new).insert(cell.id);});
+                                    self.formulas.insert(f.clone(), expr);
+                                    
+                                } else {
+                                    res.push((cell.id,Err(EvalError::UnexpectedLeftover(rest.to_string()))));
+                                },
+                            Err(err) =>  res.push((cell.id,Err(EvalError::IncorrectFormula(format!("{}",err))))),
+                        }
+                    }
+                }
+            }
+            ret.push(Ok(res));
+        }
+        ret
     }
 }
 
@@ -345,6 +386,35 @@ mod tests {
         let ret1=r.set_value(0, id1, CellValue::Integer(2));
         assert_eq!(Ok(vec![(id1,Ok(CellValue::Integer(2))),(id3,Ok(CellValue::Integer(3)))]),ret1);
     }
+
+    #[test]
+    fn test_dependencies_load() -> Result<(),EvalError> {
+        let r=&mut Runtime::new();
+        
+        let id1 = CellID::from_str("A1").unwrap();
+        r.set_value(0, id1, CellValue::Integer(1))?;
+       
+        let id2 = CellID::from_str("A2").unwrap();
+        r.set_value(0, id2, CellValue::Integer(1))?;
+       
+        let id3 = CellID::from_str("A3").unwrap();
+        r.set_formula_str(0, id3, "SUM(A1,A2)")?;
+        
+        assert_eq!(1,r.formulas.len());
+        assert!(r.formulas.contains_key("SUM(A1,A2)"));
+        assert_eq!(Some(&[id3].iter().cloned().collect()),r.dependencies.get(&id1));
+        assert_eq!(Some(&[id3].iter().cloned().collect()),r.dependencies.get(&id2));
+
+        let mut r2=Runtime::new();
+        r2.load(r.workbook.clone());
+        assert_eq!(1,r2.formulas.len());
+        assert!(r2.formulas.contains_key("SUM(A1,A2)"));
+        assert_eq!(Some(&[id3].iter().cloned().collect()),r2.dependencies.get(&id1));
+        assert_eq!(Some(&[id3].iter().cloned().collect()),r2.dependencies.get(&id2));
+
+        Ok(())
+    }
+
 
     #[test]
     fn text_cycles(){

@@ -26,12 +26,13 @@ pub fn parse_command(input: &str) -> IResult<&str, Command> {
 
 fn parse_load(input: &str) -> IResult<&str, Command> {
     let (input,_)=alt((tag("l"),tag("load")))(input)?;
+    let (input,_)=space1(input)?;
     Ok(("",Command::Load(input.to_string())))
 }
 
 fn parse_save(input: &str) -> IResult<&str, Command> {
     let (input,_)=alt((tag("s"),tag("save")))(input)?;
-    let (input,_)=space1(input)?;
+    let (input,_)=space0(input)?;
     let s = input.to_string();
     let op = if s.is_empty() {
         None
@@ -97,19 +98,22 @@ fn parse_bool_value(input: &str) -> IResult<&str, Command> {
 
 fn parse_date_value(input: &str) -> IResult<&str, Command> {
     let (input,_)=alt((tag("date"),tag("d")))(input)?;
-    let def = CellValue::Date(DateTime::from(Local::now()));
+    let def = CellValue::Date(Local::now());
     parse_value_with_default(input, def)
 }
 
 fn parse_time_value(input: &str) -> IResult<&str, Command> {
     let (input,_)=tag("time")(input)?;
-    let def = CellValue::TimeStamp(DateTime::from(Local::now()));
+    let def = CellValue::TimeStamp(Local::now());
     parse_value_with_default(input, def)
 }
 
 
 fn parse_value_with_default(input: &str,def: CellValue) -> IResult<&str, Command> {
-    let (input,_)=space0(input)?;
+    if input.is_empty() {
+        return Ok(("",Command::SetValue(def)));
+    }
+    let (input,_)=space1(input)?;
     if input.is_empty() {
         Ok(("",Command::SetValue(def)))
     } else {
@@ -136,5 +140,31 @@ mod tests {
         assert_eq!(Ok(("",Command::SetValue(CellValue::Integer(1)))), parse_command("i 1"));
         assert_eq!(Ok(("",Command::SetValue(CellValue::Integer(123)))), parse_command("i 123"));
         assert_eq!(Ok(("",Command::SetValue(CellValue::Integer(0)))), parse_command("i"));
+        let ptime = parse_command("time");
+        assert!(ptime.is_ok());
+        if let Ok((_,cmd)) = ptime {
+            match cmd {
+                Command::SetValue(v) => {
+                    match v {
+                        CellValue::TimeStamp(_) =>(),
+                        _ => panic!("Not a timestamp"),
+                    }
+                }
+                _ => panic!("Not a set value"),
+            }
+        }
+        let pdate = parse_command("date");
+        assert!(pdate.is_ok());
+        if let Ok((_,cmd)) = pdate {
+            match cmd {
+                Command::SetValue(v) => {
+                    match v {
+                        CellValue::Date(_) =>(),
+                        _ => panic!("Not a date"),
+                    }
+                }
+                _ => panic!("Not a set value"),
+            }
+        }
     }
 }
