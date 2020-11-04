@@ -12,6 +12,7 @@ The world runs on spreadsheets it seems, so here's another take at writing a spr
 
 ## TODO
 
+- use proper readline support in tablr_term
 - Support test: the library supports having test cells, but nothing is implemented yet. The idea is to be able to have copies of sheets where you cannot change formulas, but you can put values in cell and indicate which values should the formula yield, kind of built in unit tests for your spreadsheet
 - Copy and paste between cells including formula rewriting
 - Save and load to/from CSV files from the terminal
@@ -19,5 +20,7 @@ The world runs on spreadsheets it seems, so here's another take at writing a spr
 - Support direct arithmetic like A1+A2 instead of requiring function call SUM(A1,A2)
 
 ## Getting started
+
+`tablr_lib` is the library, `tablr_term` the basic terminal UI.
 
 From source, just run `cargo run -p tablr_term` and press `h` to see the help.

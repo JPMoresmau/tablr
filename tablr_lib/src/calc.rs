@@ -250,7 +250,7 @@ fn cycle_check(formula_cache: &FormulaCache, sheet: &Sheet, id: &CellID, previou
 
 #[derive(Clone, PartialOrd, PartialEq, Debug, Error)]
 pub enum EvalError {
-    #[error("Function Error")]
+    #[error("Function Error: {0}")]
     EvalFunctionError(#[source] FunctionError),
     #[error("Invalid sheet index: {0}")]
     InvalidSheetIndex(usize),
@@ -314,7 +314,10 @@ fn value(sheet: &Sheet, id: &CellID) -> CellValue {
 }
 
 fn range_values(sheet: &Sheet, from: &CellID, to: &CellID) -> Vec<CellValue> {
-    range_ids(from, to).iter().map(|id|  value(sheet,id)).collect()
+    range_ids(from, to).iter().map(|id|  value(sheet,id)).filter(|v| match v{
+        CellValue::Empty=>false,
+        _=>true,
+    }).collect()
 }
 
 fn range_ids(from: &CellID, to: &CellID) -> Vec<CellID> {
@@ -363,6 +366,7 @@ mod tests {
         let id2 = r.workbook.sheets[0].set_cell( Cell::new("B1", CellValue::Integer(2)));
 
         assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],range_values(&r.workbook.sheets[0], &id1, &id2));
+        assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],range_values(&r.workbook.sheets[0], &id1, &CellID::from_str("C1").unwrap()));
         assert_eq!(Ok(CellValue::Empty),r.eval(0, &Expr::Range{from:id1,to:id2}));
     }
 
