@@ -16,12 +16,23 @@ pub struct Runtime {
     functions: FunctionLibrary,
 }
 
-pub type SetResult = Result<Vec<(CellID,Result<CellValue,EvalError>)>,EvalError>;
+pub type CellResult = (CellID,Result<CellValue,EvalError>);
+pub type SetResult = Result<Vec<CellResult>,EvalError>;
 
 pub fn setresult_ok(r: &SetResult) -> bool {
     match r {
         Err(_)=>false,
-        Ok(v)=>v.iter().all(|t| t.1.is_ok())
+        Ok(v)=> v.iter().all(|t| t.1.is_ok()),
+    }
+}
+
+pub fn setresult_impactedcells(r: &SetResult) -> (HashSet<CellID>,HashSet<CellID>) {
+    match r {
+        Err(_)=>(HashSet::new(),HashSet::new()),
+        Ok(v)=>{
+            let(ok,err):(Vec<(CellID,bool)>,Vec<(CellID,bool)>) =v.iter().map(|t| (t.0,t.1.is_ok())).partition(|t| t.1);
+            (ok.iter().map(|t| t.0).collect(),err.iter().map(|t| t.0).collect())
+        }
     }
 }
 
@@ -205,7 +216,7 @@ fn runtime_check(formula_cache: &FormulaCache, sheet: &Sheet, id: CellID, expr: 
     let mut s:HashSet<CellID> = HashSet::new();
     expr.get_references(&mut s);
     if s.contains(&id){
-        return Err(EvalError::CycleDetected(vec![id]));
+        return Err(EvalError::CycleDetected(CellIDVec{ids:vec![id]}));
     }
     let mut previous_ids=vec![];
     previous_ids.push(id);
@@ -225,7 +236,7 @@ fn cycle_check(formula_cache: &FormulaCache, sheet: &Sheet, id: &CellID, previou
             for cid in s.iter() {
                 if previous_ids.contains(cid){
                     previous_ids.push(*cid);
-                    return Err(EvalError::CycleDetected(previous_ids.clone()));
+                    return Err(EvalError::CycleDetected(CellIDVec{ids:previous_ids.clone()}));
                 } else {
                     previous_ids.push(*cid);
                     cycle_check(formula_cache, sheet, cid, previous_ids)?;
@@ -245,8 +256,8 @@ pub enum EvalError {
     InvalidSheetIndex(usize),
     #[error("Unknown function: {0}")]
     UnknownFunction(String),
-    #[error("Cycle detected: {0:?}")]
-    CycleDetected(Vec<CellID>),
+    #[error("Cycle detected: {0}")]
+    CycleDetected(CellIDVec),
     #[error("Unexpected left over text: {0}")]
     UnexpectedLeftover(String),
     #[error("Incorrect formula: {0}")]
@@ -422,7 +433,7 @@ mod tests {
         
         let id1 = CellID::from_str("A1").unwrap();
         let ret1 = r.set_formula(0, id1, Expr::Reference(id1));
-        assert_eq!(Err(EvalError::CycleDetected(vec![id1])), ret1);
+        assert_eq!(Err(EvalError::CycleDetected(CellIDVec{ids:vec![id1]})), ret1);
 
         let id2 = CellID::from_str("A2").unwrap();
 
@@ -430,7 +441,7 @@ mod tests {
         assert!(ret1.is_ok());
 
         let ret2 = r.set_formula(0, id2, Expr::Reference(id1));
-        assert_eq!(Err(EvalError::CycleDetected(vec![id2,id1,id2])), ret2);
+        assert_eq!(Err(EvalError::CycleDetected(CellIDVec{ids:vec![id2,id1,id2]})), ret2);
 
     }
 }

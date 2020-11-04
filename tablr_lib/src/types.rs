@@ -54,6 +54,17 @@ impl fmt::Display for CellID {
     }
 }
 
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+pub struct CellIDVec {
+    pub ids: Vec<CellID>,
+}
+
+impl fmt::Display for CellIDVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}",self.ids.iter().map(|id| id.to_string()).collect::<Vec<String>>().join(","))
+    }
+}
+
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Error)]
 pub enum CellIDParseError{
     #[error("Unexpected character: {0}")]

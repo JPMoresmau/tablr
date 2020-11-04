@@ -58,6 +58,7 @@ pub fn built_in_functions() -> HashMap<String, Box<dyn Function>> {
     m.insert("TIMES".to_string(), Box::new(Multiply));
     m.insert("DIVIDE".to_string(), Box::new(Divide));
     m.insert("AVERAGE".to_string(), Box::new(Average));
+    m.insert("AVG".to_string(), Box::new(Average));
     m
 }
 

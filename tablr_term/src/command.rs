@@ -6,7 +6,7 @@ use nom::{
     character::complete::{space1, space0},
     combinator::{eof},
   };
-use chrono::{Local,DateTime};
+use chrono::{Local};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Command {

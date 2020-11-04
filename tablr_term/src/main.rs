@@ -1,6 +1,7 @@
 use tablr_lib::*;
-use prettytable::{Table, Row, Cell};
+use prettytable::{Table, Row, Cell,Attr, color};
 use std::io::{stdout,stdin,Write};
+use std::collections::{HashSet};
 
 mod command;
 use command::*;
@@ -8,7 +9,7 @@ use command::*;
 fn main() {
     println!("Welcome to Tablr");
     let mut state=TablrState::new();
-    print_table(&state);
+    print_table(&state, None);
     print_prompt(&state);
     loop {
         match read() {
@@ -61,7 +62,7 @@ fn eval(state: &mut TablrState, c:Command){
             match load(&path) {
                 Ok(wk)=>{
                     let vr=state.runtime.load(wk);
-                    print_table(&state);
+                    print_table(&state, None);
                     vr.iter().for_each(|r| print_errors(r));
                 },
                 Err(err)=> println!("Load error: {}",err),
@@ -92,7 +93,7 @@ fn eval(state: &mut TablrState, c:Command){
             if setresult_ok(&r){
                 state.current_cell=state.current_cell.next_row();
             }
-            print_table(&state);
+            print_table(&state, Some(&r));
             print_errors(&r);
         },
         Command::SetFormula(f)=> {
@@ -107,7 +108,7 @@ fn eval(state: &mut TablrState, c:Command){
                 if setresult_ok(&r){
                     state.current_cell=state.current_cell.next_row();
                 }
-                print_table(&state);
+                print_table(&state, Some(&r));
                 print_errors(&r);
             }
         },
@@ -161,7 +162,7 @@ impl TablrState {
     }
 }
 
-fn print_table(state: &TablrState) {
+fn print_table(state: &TablrState,or: Option<&SetResult>) {
     let sheet = &state.runtime.workbook.sheets[state.current_sheet];
     let mut table = Table::new();
     let (mut max_col,mut max_row)= sheet.metadata.size();
@@ -175,12 +176,23 @@ fn print_table(state: &TablrState) {
     }
     table.add_row(Row::new(hs));
 
+    let (oks, errs) = or.map(|r| setresult_impactedcells(r)).unwrap_or((HashSet::new(),HashSet::new()));
+
     for r in 0..max_row {
         let mut row=vec![];
         row.push(Cell::new(&format!("{}",r+1)));
         for c in 0..max_col {
-            let cv=sheet.get_cell(&CellID{row:r,col:c}).map(|c| &c.value).unwrap_or(&CellValue::Empty);
-            row.push(Cell::new(&cv.to_string()));
+            let cid = CellID{row:r,col:c};
+            let cv=sheet.get_cell(&cid).map(|c| &c.value).unwrap_or(&CellValue::Empty);
+            let mut cell = Cell::new(&cv.to_string());
+            if oks.contains(&cid){
+                cell=cell.with_style(Attr::BackgroundColor(color::GREEN))
+                    .with_style(Attr::ForegroundColor(color::BLACK));
+            } else if errs.contains(&cid){
+                cell=cell.with_style(Attr::BackgroundColor(color::RED))
+                .with_style(Attr::ForegroundColor(color::BLACK));
+            }
+            row.push(cell);
         }
         table.add_row(Row::new(row));
     }
