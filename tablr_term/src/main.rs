@@ -53,6 +53,16 @@ fn with_extension(mut path: String) -> String {
     path
 }
 
+fn with_csv_extension(mut path: String) -> String {
+    if !path.ends_with(".tablr"){
+        path=path.trim_end_matches(".tablr").to_string();
+    }
+    if !path.ends_with(".csv"){
+        path.push_str(".csv");
+    }
+    path
+}
+
 fn eval(state: &mut TablrState, c:Command){
     match c {
         Command::Quit=>(),
@@ -68,6 +78,19 @@ fn eval(state: &mut TablrState, c:Command){
                 Err(err)=> println!("Load error: {}",err),
             }
         },
+        Command::LoadCSV(path, desc)=>{
+            let path =with_csv_extension(path);
+            match load_csv(&path, &desc) {
+                Ok(sh)=>{
+                    let mut wk=Workbook::new();
+                    wk.sheets[0]=sh;
+                    let vr=state.runtime.load(wk);
+                    print_table(&state, None);
+                    vr.iter().for_each(|r| print_errors(r));
+                },
+                Err(err)=> println!("Load error: {}",err),
+            }
+        },
         Command::Save(path)=>{
             let npath = path.map(with_extension).or(state.path.take());
             match npath {
@@ -75,6 +98,19 @@ fn eval(state: &mut TablrState, c:Command){
                 Some(p)=> {
                     state.path=Some(p.clone());
                     match save(&state.runtime.workbook, &p){
+                        Ok(_)=> println!("Saved to {}",p),
+                        Err(err)=> println!("Save error: {}",err),
+                    }
+                },
+            }
+        },
+        Command::SaveCSV(path)=>{
+            let npath = path.or(state.path.clone()).map(with_csv_extension);
+            match npath {
+                None=>println!("No path provided"),
+                Some(p)=> {
+                    state.path=Some(p.clone());
+                    match save_csv(&state.runtime.workbook.sheets[state.current_sheet], &p){
                         Ok(_)=> println!("Saved to {}",p),
                         Err(err)=> println!("Save error: {}",err),
                     }
@@ -118,7 +154,9 @@ fn eval(state: &mut TablrState, c:Command){
 const HELP: &'static str = "q to quit
 l | load <path> to load a saved file
 s | save <path?> to save to a path (save to previous path if not provided)
-c | choose <cellid> to choose a cell
+lc | loadcsv <headerCount> <column types> <path> to load a CSV file: lc 1 t i example.csv loads a file with one row of headers, first column is text, second column is integer
+sc | savecsv <path?> to save to a CSV file
+c | choose <cellid> to choose a cell: c A2
 t | text <value?> to set a text value to a cell
 i | int <value?> to set an integer value to a cell
 f | float <value?> to set an float value to a cell

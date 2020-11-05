@@ -336,6 +336,7 @@ impl Default for Metadata {
         Metadata::new()
     }
 }
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct InputDescription {
     pub headers: usize,
     pub template: Vec<CellValue>,
