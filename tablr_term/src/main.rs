@@ -1,7 +1,8 @@
 use tablr_lib::*;
 use prettytable::{Table, Row, Cell,Attr, color};
-use std::io::{stdout,stdin,Write};
 use std::collections::{HashSet};
+use rustyline::error::ReadlineError;
+use rustyline::Editor;
 
 mod command;
 use command::*;
@@ -10,33 +11,38 @@ fn main() {
     println!("Welcome to Tablr");
     let mut state=TablrState::new();
     print_table(&state, None);
-    print_prompt(&state);
+    let mut rl = Editor::<()>::new();
+    //print_prompt(&state);
     loop {
-        match read() {
+       
+        match read(&state, &mut rl) {
             Some(Command::Quit)=>break,
-            Some(cmd)=>{
-                eval(&mut state, cmd);
-                print_prompt(&state);
-            },
-            None=> print_prompt(&state),
+            Some(cmd)=> eval(&mut state, cmd),
+            None=> (),
         }
     }
     
 }
 
-fn read() -> Option<Command> {
-    let mut buffer = String::new();
-    match stdin().read_line(&mut buffer){
-        Ok(_sz)=> {
-            let s =buffer.trim_end_matches("\n").trim_end_matches("\r");
-            if s.is_empty() {
+fn read(state: &TablrState,rl : &mut Editor<()>) -> Option<Command> {
+    let readline = rl.readline(&format!("{}>> ",state.current_cell));
+    match readline{
+        Ok(line)=> {
+            if line.is_empty() {
                 None
             } else {
-                match parse_command(s) {
+                rl.add_history_entry(line.as_str());
+                match parse_command(&line) {
                     Ok((_i,cmd))=>Some(cmd),
                     Err(err) => {println!("{}",err); None},
                 }
             }
+        },
+        Err(ReadlineError::Interrupted) => {
+            Some(Command::Quit)
+        },
+        Err(ReadlineError::Eof) => {
+            Some(Command::Quit)
         },
         Err(err) => {
             println!("{}",err); 
@@ -165,10 +171,10 @@ d | date <value?> to set a date value to a cell
 time <value?> to set a timestamp value to a cell
 f | formula <value?> to set a formula for a cell, emtpy value to display the current formula";
 
-fn print_prompt(state: &TablrState){
-    print!("{}> ",state.current_cell);
-    let _=stdout().flush();
-}
+//fn print_prompt(state: &TablrState){
+//    print!("{}> ",state.current_cell);
+//    let _=stdout().flush();
+//}
 
 fn print_errors(r: &SetResult){
     match r {
