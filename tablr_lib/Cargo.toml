@@ -11,3 +11,4 @@ nom = "6"
 csv = "1.1"
 thiserror = "1.0.21"
 chrono = { version ="0.4", features = ["serde"] }
+rhai = {version = "0.19.5", path="../../rhai"}

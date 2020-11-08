@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::fmt;
+use std::ops::Add;
 use serde::{Deserialize, Serialize};
 use serde::ser::{Serializer, SerializeSeq};
 use serde::de::{Deserializer, Visitor, SeqAccess};
@@ -185,6 +186,20 @@ impl CellValue {
             CellValue::Date(_) => val.parse().map(CellValue::Date).map_err(CellValueParseError::InvalidDateTime),
             CellValue::Empty => Ok(CellValue::Empty),
             _ => Ok(CellValue::Text(val.to_owned())),
+        }
+    }
+}
+
+impl Add for CellValue {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        match (self,other) {
+            (CellValue::Integer(a), CellValue::Integer(b))=>CellValue::Integer(a+b),
+            (CellValue::Integer(a), CellValue::Float(b))=>CellValue::Float(a as f64+b),
+            (CellValue::Float(a), CellValue::Integer(b))=>CellValue::Float(a+b as f64),
+            (CellValue::Float(a), CellValue::Float(b))=>CellValue::Float(a+b),
+            _=>CellValue::Empty,
         }
     }
 }

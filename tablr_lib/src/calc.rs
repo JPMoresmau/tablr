@@ -328,6 +328,8 @@ fn range_ids(from: &CellID, to: &CellID) -> Vec<CellID> {
 mod tests {
     use super::*;
     use std::str::FromStr;
+    use rhai::{Engine, Dynamic, RegisterFn};
+   
 
     #[test]
     fn test_range_ids() {
@@ -432,7 +434,7 @@ mod tests {
 
 
     #[test]
-    fn text_cycles(){
+    fn test_cycles(){
         let r=&mut Runtime::new();
         
         let id1 = CellID::from_str("A1").unwrap();
@@ -448,4 +450,59 @@ mod tests {
         assert_eq!(Err(EvalError::CycleDetected(CellIDVec{ids:vec![id2,id1,id2]})), ret2);
 
     }
+
+    #[test]
+    fn test_rhai(){
+        let mut engine = Engine::new();
+
+        let result = engine.eval_expression::<i64>("40 + 2");
+        assert!(matches!(result,Ok(x) if x==42));
+
+        engine.on_var(|name,_,_| {
+            match name {
+                "A1"=> Ok(Some(Dynamic::from(CellValue::Integer(40)))),
+                "A2"=> Ok(Some(Dynamic::from(CellValue::Integer(2)))),
+                _ => Ok(None)
+            }
+        });
+        engine.register_type::<CellValue>();
+        println!("{}",CellValue::Integer(40) + CellValue::Integer(2));
+        engine.register_fn("+", add_v);
+
+        let rast= engine.compile_expression("A1 + A2");
+        if let Ok(ast) = rast {
+            println!("vars: {:?}",ast.extract_variables());
+            let result= engine.eval_ast::<CellValue>(&ast);
+            println!("{:?}",result);
+            assert!(matches!(result,Ok(x) if x==CellValue::Integer(42)));
+        }
+        engine.on_var(|name,_,_| {
+            match name {
+                "R1"=> Ok(Some(Dynamic::from(vec![10_f64,20_f64,30_f64,40_f64]))),
+                _ => Ok(None)
+            }
+        });
+
+        engine.register_fn("avg",avg);
+        engine.register_fn("avg",avg_f);
+
+        let result = engine.eval_expression::<f64>("avg(R1)");
+        println!("avg:{:?}",result);
+        assert!(matches!(result,Ok(x) if x==25.0));
+
+    }
+
+    fn avg(vs: Vec<i64>) -> f64 {
+        vs.iter().sum::<i64>() as f64 / vs.len() as f64
+    }
+
+    fn avg_f(vs: Vec<f64>) -> f64 {
+        vs.iter().sum::<f64>() / vs.len() as f64
+    }
+
+    fn add_v(cv1: CellValue, cv2: CellValue) -> CellValue{
+        return cv1+cv2;
+    }
+
+    
 }
