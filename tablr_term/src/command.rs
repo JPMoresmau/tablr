@@ -2,7 +2,7 @@ use tablr_lib::*;
 use nom::{
     IResult,
     branch::alt,
-    bytes::complete::{tag},
+    bytes::complete::{tag,take_while1},
     character::complete::{space1, space0, digit1},
     combinator::{eof},
     multi::many1,
@@ -93,6 +93,23 @@ fn parse_choose(input: &str) -> IResult<&str, Command> {
     let (input,_)=space1(input)?;
     let (input,cell_id) = parse_id(input)?;
     Ok((input,Command::Choose(cell_id)))
+}
+
+
+pub fn parse_id(input: &str) -> IResult<&str, CellID> {
+    let mut row = 0;
+    let mut col = 0;
+
+    let (input, cols) = take_while1(|c: char| c.is_ascii_alphabetic())(input)?;
+    for c in cols.to_uppercase().chars() {
+        col= col*26 + (c as u8 - b'A' + 1) as usize;
+    }
+    let (input, rows) = take_while1(|c:char| c.is_ascii_digit())(input)?;
+    for c in rows.chars() {
+        let d = c.to_digit(10).unwrap();
+        row=row*10 +d as usize;
+    }
+    Ok((input,CellID{col:col-1, row:row-1}))
 }
 
 fn parse_value(input: &str) -> IResult<&str, Command> {

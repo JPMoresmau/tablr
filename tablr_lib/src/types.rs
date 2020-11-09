@@ -109,6 +109,94 @@ impl FromStr for CellID {
     }
 }
 
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+pub struct CellRange {
+    pub from: CellID,
+    pub to: CellID,
+}
+
+impl CellRange {
+    pub fn cell_ids(&self) -> Vec<CellID> {
+        (self.from.row ..= self.to.row).flat_map(|r| (self.from.col ..= self.to.col).map(move |c| CellID{row:r,col:c})).collect()
+    }
+}
+
+impl fmt::Display for CellRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}_{}",self.from,self.to)
+    }
+}
+
+
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Error)]
+pub enum CellRangeParseError{
+    #[error("Unexpected character: {0}")]
+    Unexpected(char),
+    #[error("Invalid row: {0}")]
+    InvalidRow(usize),
+    #[error("Invalid column: {0}")]
+    InvalidCol(usize),
+    #[error("Invalid range")]
+    InvalidRange,
+}
+
+impl FromStr for CellRange {
+    type Err = CellRangeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut incol=true;
+        let mut row = 0;
+        let mut col = 0;
+        let mut from = None;
+        let mut to = None;
+        for c in s.to_uppercase().chars() {
+            if incol {
+                if c.is_ascii_alphabetic() {
+                    col= col*26 + (c as u8 - b'A' + 1) as usize;
+                } else {
+                    incol = false;
+                }
+            } 
+            if !incol {
+                if let Some(d)=c.to_digit(10) {
+                    row=row*10 +d as usize;
+                } else if c=='_' {
+                    if row<1{
+                        return Err(CellRangeParseError::InvalidRow(row));
+                    }
+                    if col<1{
+                        return Err(CellRangeParseError::InvalidCol(col));
+                    }
+                    if from.is_none(){
+                        from=Some(CellID{col:col-1, row:row-1});
+                        row=0;
+                        col=0;
+                        incol=true;
+                    } else {
+                        return Err(CellRangeParseError::Unexpected(c));
+                    }
+                } else {
+                    return Err(CellRangeParseError::Unexpected(c));
+                }
+            }
+        }
+        if row<1{
+            return Err(CellRangeParseError::InvalidRow(row));
+        }
+        if col<1{
+            return Err(CellRangeParseError::InvalidCol(col));
+        }
+        if to.is_none(){
+            to=Some(CellID{col:col-1, row:row-1});
+        }
+        if let Some(f) = from {
+            if let Some(t) = to {
+                return Ok (CellRange{from:f,to:t});
+            }
+        }
+        Err(CellRangeParseError::InvalidRange)
+    }
+}
 
 #[derive(Clone, PartialOrd, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Cell {
@@ -384,6 +472,26 @@ mod tests {
         for str in strs.into_iter() {
             assert_eq!(str.to_owned(), format!("{}",CellID::from_str(str).unwrap()));
         }
+    }
+
+    #[test]
+    fn test_parse_range(){
+        assert_eq!(Ok(CellRange{from:CellID{row:0,col:0},to:CellID{row:0,col:1}}), CellRange::from_str("A1_B1"));
+    }
+
+    #[test]
+    fn test_range_ids() {
+        test_range_id("A1","A1",vec!["A1"]);
+        test_range_id("A1","A2",vec!["A1","A2"]);
+        test_range_id("A1","A3",vec!["A1","A2","A3"]);
+        test_range_id("A1","B1",vec!["A1","B1"]);
+        test_range_id("A1","C1",vec!["A1","B1","C1"]);
+        test_range_id("A1","B2",vec!["A1","B1","A2","B2"]);
+        test_range_id("A1","C3",vec!["A1","B1","C1","A2","B2","C2","A3","B3","C3"]);
+    }
+
+    fn test_range_id(from: &str, to: &str, expected: Vec<&str>) {
+        assert_eq!(expected.iter().map(|s| CellID::from_str(s).unwrap()).collect::<Vec<CellID>>(),CellRange{from:CellID::from_str(from).unwrap(),to: CellID::from_str(to).unwrap()}.cell_ids());
     }
 
     #[test]
