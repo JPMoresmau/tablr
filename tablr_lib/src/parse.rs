@@ -39,7 +39,7 @@ pub fn parse_id(input: &str) -> IResult<&str, CellID> {
 
 fn parse_range(input: &str) -> IResult<&str, Expr> {
     let (input,(from,_,to)) = tuple((parse_id, tag(":"), parse_id))(input)?;
-    Ok((input,Expr::Range{from,to}))
+    Ok((input,Expr::Range(CellRange{from,to})))
 }
 
 fn parse_func(input: &str) -> IResult<&str, Expr> {
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_parse_range(){
-        assert_eq!(Ok(("",Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}})), parse_range("A1:B3"));
+        assert_eq!(Ok(("",Expr::Range(CellRange{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}))), parse_range("A1:B3"));
         assert!(parse_range("A1").is_err());
         assert!(parse_range("A1:").is_err());
         assert!(parse_range(":A1").is_err());
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_parse_function(){
-        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}]})), parse_func("SUM(A1:B3)"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:CellID{row:0,col:0},to:CellID{row:2,col:1}})]})), parse_func("SUM(A1:B3)"));
         assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:2,col:1})]})), parse_func("sum(A1,B3)"));
         assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:2,col:1})]})), parse_func("sum ( A1,  B3 ) "));
         
@@ -156,8 +156,8 @@ mod tests {
     #[test]
     fn test_parse_expr(){
         assert_eq!(Ok(("",Expr::Reference(CellID{row:0,col:0}))), parse_expr("A1"));
-        assert_eq!(Ok(("",Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}})), parse_expr("A1:B3"));
-        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}]})), parse_expr("  SUM( A1:B3 )"));
+        assert_eq!(Ok(("",Expr::Range(CellRange{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}))), parse_expr("A1:B3"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:CellID{row:0,col:0},to:CellID{row:2,col:1}})]})), parse_expr("  SUM( A1:B3 )"));
         assert_eq!(Ok(("",Expr::Value(CellValue::Text("ab\ncd".to_string())))),parse_expr(r#""ab\ncd""#));
     }
 }

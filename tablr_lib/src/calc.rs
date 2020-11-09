@@ -181,7 +181,7 @@ fn set_sheet_value(functions: &FunctionLibrary, dependencies: &CellDependencies,
 #[derive(Clone, PartialOrd, PartialEq, Debug)]
 pub enum Expr {
     Reference(CellID),
-    Range{from:CellID,to:CellID},
+    Range(CellRange),
     Function{name:String, args:Vec<Expr>},
     Value(CellValue),
 }
@@ -190,7 +190,7 @@ impl Expr {
     pub fn get_references(&self, v: &mut HashSet<CellID>) {
         match self {
             Expr::Reference(id)=> {v.insert(*id);},
-            Expr::Range{from,to} => range_ids(from,to).into_iter().for_each(|id| {v.insert(id);}),
+            Expr::Range(range) => range.cell_ids().into_iter().for_each(|id| {v.insert(id);}),
             Expr::Function{name:_name, args}=>args.iter().for_each(|e| e.get_references(v)),
             _ => (),
         }
@@ -201,7 +201,7 @@ impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Reference(id)=> write!(f, "{}",id),
-            Expr::Range{from,to} => write!(f, "{}:{}",from,to),
+            Expr::Range(range) => write!(f, "{}",range),
             Expr::Function{name, args}=>{
                 let argument_string=args.iter().map(|e| format!("{}",e)).collect::<Vec<String>>().join(",");
                 write!(f,"{}({})",name,argument_string)
@@ -276,8 +276,8 @@ fn runtime_sheet_eval(functions: &FunctionLibrary, sheet: &Sheet, expr: &Expr) -
 
     match expr {
             Expr::Value(v)=>Ok(v.clone()),
-            Expr::Reference(id) => Ok(value(sheet,id)),
-            Expr::Range{..} => Ok(CellValue::Empty),
+            Expr::Reference(id) => Ok(sheet.cell_value(id)),
+            Expr::Range(_) => Ok(CellValue::Empty),
             Expr::Function{name,args} =>apply_function(functions,sheet,name,args),
     }
    
@@ -287,8 +287,8 @@ fn apply_function(functions: &FunctionLibrary, sheet: &Sheet, name: &str, args: 
     if let Some(f)= functions.get(name) {
         let mut params = vec![];
         args.iter().try_for_each(|a| match a {
-            Expr::Range{from,to} => {
-                params.append(&mut range_values(sheet, from, to));
+            Expr::Range(range) => {
+                params.append(&mut sheet.range_values(range));
                 Ok(())
             },
             _ => {
@@ -309,40 +309,11 @@ fn apply_function(functions: &FunctionLibrary, sheet: &Sheet, name: &str, args: 
     
 }
 
-fn value(sheet: &Sheet, id: &CellID) -> CellValue {
-    sheet.get_cell(id).map(|c| c.value.clone()).unwrap_or(CellValue::Empty)
-}
-
-fn range_values(sheet: &Sheet, from: &CellID, to: &CellID) -> Vec<CellValue> {
-    range_ids(from, to).iter().map(|id|  value(sheet,id)).filter(|v| match v{
-        CellValue::Empty=>false,
-        _=>true,
-    }).collect()
-}
-
-fn range_ids(from: &CellID, to: &CellID) -> Vec<CellID> {
-    (from.row ..= to.row).flat_map(|r| (from.col ..= to.col).map(move |c| CellID{row:r,col:c})).collect()
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::str::FromStr;
-
-    #[test]
-    fn test_range_ids() {
-        test_range_id("A1","A1",vec!["A1"]);
-        test_range_id("A1","A2",vec!["A1","A2"]);
-        test_range_id("A1","A3",vec!["A1","A2","A3"]);
-        test_range_id("A1","B1",vec!["A1","B1"]);
-        test_range_id("A1","C1",vec!["A1","B1","C1"]);
-        test_range_id("A1","B2",vec!["A1","B1","A2","B2"]);
-        test_range_id("A1","C3",vec!["A1","B1","C1","A2","B2","C2","A3","B3","C3"]);
-    }
-
-    fn test_range_id(from: &str, to: &str, expected: Vec<&str>) {
-        assert_eq!(expected.iter().map(|s| CellID::from_str(s).unwrap()).collect::<Vec<CellID>>(),range_ids(&CellID::from_str(from).unwrap(), &CellID::from_str(to).unwrap()));
-    }
 
     #[test]
     fn test_ref_expr() {
@@ -353,7 +324,7 @@ mod tests {
         
 
         r.workbook.sheets[0].set_cell( c);
-        assert_eq!(CellValue::Integer(1),value(&r.workbook.sheets[0], &id));
+        assert_eq!(CellValue::Integer(1),r.workbook.sheets[0].cell_value(&id));
         assert_eq!(Ok(CellValue::Integer(1)),r.eval(0, &Expr::Reference(id)));
     }
 
@@ -364,10 +335,11 @@ mod tests {
         let id1 = r.workbook.sheets[0].set_cell( Cell::new("A1",CellValue::Integer(1)));
 
         let id2 = r.workbook.sheets[0].set_cell( Cell::new("B1", CellValue::Integer(2)));
-
-        assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],range_values(&r.workbook.sheets[0], &id1, &id2));
-        assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],range_values(&r.workbook.sheets[0], &id1, &CellID::from_str("C1").unwrap()));
-        assert_eq!(Ok(CellValue::Empty),r.eval(0, &Expr::Range{from:id1,to:id2}));
+        let r1=CellRange{from:id1,to:id2};
+        let r2=CellRange{from:id1,to:CellID::from_str("C1").unwrap()};
+        assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],r.workbook.sheets[0].range_values(&r2));
+        assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],r.workbook.sheets[0].range_values(&r2));
+        assert_eq!(Ok(CellValue::Empty),r.eval(0, &Expr::Range(r1)));
     }
 
     #[test]
@@ -379,7 +351,8 @@ mod tests {
         let id2 = r.workbook.sheets[0].set_cell( Cell::new("B1", CellValue::Integer(2)));
 
         assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(id1),Expr::Reference(id2)]}));
-        assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range{from:id1,to:id2}]}));
+        assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:id1,to:id2})]}));
+
     }
 
     #[test]
@@ -447,5 +420,19 @@ mod tests {
         let ret2 = r.set_formula(0, id2, Expr::Reference(id1));
         assert_eq!(Err(EvalError::CycleDetected(CellIDVec{ids:vec![id2,id1,id2]})), ret2);
 
+    }
+
+    #[test]
+    fn test_mix()-> Result<(),EvalError>{
+        let r=&mut Runtime::new();
+        
+        let id1 = CellID::from_str("A1").unwrap();
+        r.set_value(0, id1, CellValue::Integer(1))?;
+               
+        let id2 = CellID::from_str("A2").unwrap();
+        r.set_formula_str(0, id2, "SUM(A1,2)")?;
+        assert_eq!(CellValue::Integer(3),r.workbook.sheets[0].cell_value(&id2));
+
+        Ok(())
     }
 }
