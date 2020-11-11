@@ -6,15 +6,27 @@ use nom::{
     IResult,
     branch::alt,
     bytes::complete::{tag, take_while1, escaped_transform},
-    character::complete::{none_of,char, digit1,space0},
+    character::complete::{none_of,char, digit1,multispace0},
     combinator::map,
-    multi::separated_list0,
+    multi::{separated_list0, fold_many0},
     number::complete::{double},
     sequence::{delimited, tuple},
   };
 
 pub fn parse_expr(input: &str) -> IResult<&str, Expr> {
-    alt((parse_range,parse_ref,parse_func,parse_value))(space0(input)?.0)
+    parse_terms(input)
+}
+
+fn parse_inner_expr(input: &str) -> IResult<&str, Expr> {
+    alt((parse_parens,parse_range,parse_ref,parse_func,parse_value))(multispace0(input)?.0)
+}
+
+fn parse_parens(input: &str) -> IResult<&str, Expr> {
+    delimited(
+        spaced("("),
+        parse_expr,
+        spaced(")")
+        )(input)
 }
 
 fn parse_ref(input: &str) -> IResult<&str, Expr> {
@@ -50,13 +62,58 @@ fn parse_func(input: &str) -> IResult<&str, Expr> {
     Ok((input,Expr::Function{name:name.to_string().to_uppercase(),args}))
 }
 
+fn combine_fn(e0: Expr, e1: Expr, op: &str) -> Expr {
+    match e0 {
+        Expr::Function{name,mut args} if name==op => {
+            args.push(e1);
+            Expr::Function{name:op.to_string(),args}
+        }
+        _=>Expr::Function{name:op.to_string(),args:vec![e0,e1]}
+    }
+   
+}
+
+fn parse_terms(input: &str) -> IResult<&str, Expr> {
+    let (input,expr0) = parse_factors(input)?;
+    let (input,expr1) = fold_many0(move |input| {
+        let (input,c) = alt((spaced("+"),spaced("-")))(input)?;
+        let (input,e) = parse_factors(input)?;
+        Ok((input,(c,e)))
+    }, expr0, |e0, (op, e1)| {
+        if op=="+"{
+            combine_fn(e0,e1,"SUM")
+        } else {
+            combine_fn(e0,e1,"MINUS")
+        }
+    })(input)?;
+    Ok((input,expr1))
+}
+
+
+fn parse_factors(input: &str) -> IResult<&str, Expr> {
+    let (input,expr0) = parse_inner_expr(input)?;
+    let (input,expr1) = fold_many0(move |input| {
+        let (input,c) = alt((spaced("*"),spaced("/")))(input)?;
+        let (input,e) = parse_inner_expr(input)?;
+        Ok((input,(c,e)))
+    }, expr0, |e0, (op, e1)| {
+        if op=="*"{
+            combine_fn(e0,e1,"MULTIPLY")
+        } else {
+            combine_fn(e0,e1,"DIVIDE")
+        }
+    })(input)?;
+    Ok((input,expr1))
+}
+
 fn spaced<'a, Error: ParseError<&'a str>>(txt: &'a str) -> impl Fn(&'a str) -> IResult<&'a str,&'a str, Error> {
     //tag(txt)
     move |input| {
-        let (input,_)=space0(input)?;
-        let (input,t)=tag(txt)(input)?;
-        let (input,_)=space0(input)?;
-        Ok((input,t))
+        delimited(
+            multispace0,
+            tag(txt),
+            multispace0
+          )(input)
     }
 }
 
@@ -103,6 +160,7 @@ fn parse_newline(input: &str) -> IResult<&str, &str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_parse_ref(){
@@ -159,5 +217,86 @@ mod tests {
         assert_eq!(Ok(("",Expr::Range(CellRange{from:CellID{row:0,col:0},to:CellID{row:2,col:1}}))), parse_expr("A1:B3"));
         assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:CellID{row:0,col:0},to:CellID{row:2,col:1}})]})), parse_expr("  SUM( A1:B3 )"));
         assert_eq!(Ok(("",Expr::Value(CellValue::Text("ab\ncd".to_string())))),parse_expr(r#""ab\ncd""#));
+    }
+
+    #[test]
+    fn test_parse_nested(){
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![
+            Expr::Reference(CellID{row:0,col:0}),
+            Expr::Function{name:"MULTIPLY".to_string(),args:vec![Expr::Range(CellRange::from_str("B1:B5").unwrap())]}
+            ]})), parse_expr("SUM(A1,MULTIPLY(B1:B5))"));
+    }
+
+    #[test]
+    fn test_parse_arithmetic(){
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1+A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1 + A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"MINUS".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1-A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"MINUS".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1 - A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"MINUS".to_string(),args:
+            vec![
+                Expr::Function{name:"SUM".to_string(),args:
+                vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})
+                ]},
+                Expr::Reference(CellID{row:2,col:0})
+                ]})), parse_expr("A1 + A2 -A3"));
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:
+                vec![
+                    Expr::Function{name:"MINUS".to_string(),args:
+                    vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})
+                    ]},
+                    Expr::Reference(CellID{row:2,col:0})
+                    ]})), parse_expr("A1 - A2 + A3"));
+        
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0}),Expr::Reference(CellID{row:2,col:0})]})), parse_expr("A1+A2 + A3"));
+        assert_eq!(Ok(("",Expr::Function{name:"MINUS".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0}),Expr::Reference(CellID{row:2,col:0})]})), parse_expr("A1-A2 - A3"));
+        
+        assert_eq!(Ok(("",Expr::Function{name:"MULTIPLY".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1*A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"MULTIPLY".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1 * A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"DIVIDE".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1/A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"DIVIDE".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})]})), parse_expr("A1 / A2"));
+        assert_eq!(Ok(("",Expr::Function{name:"DIVIDE".to_string(),args:
+            vec![
+                Expr::Function{name:"MULTIPLY".to_string(),args:
+                vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})
+                ]},
+                Expr::Reference(CellID{row:2,col:0})
+                ]})), parse_expr("A1 * A2 /A3"));
+        assert_eq!(Ok(("",Expr::Function{name:"MULTIPLY".to_string(),args:
+                vec![
+                    Expr::Function{name:"DIVIDE".to_string(),args:
+                    vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})
+                    ]},
+                    Expr::Reference(CellID{row:2,col:0})
+                    ]})), parse_expr("A1 / A2 * A3"));
+        
+        assert_eq!(Ok(("",Expr::Function{name:"MULTIPLY".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0}),Expr::Reference(CellID{row:2,col:0})]})), parse_expr("A1*A2 * A3"));
+        assert_eq!(Ok(("",Expr::Function{name:"DIVIDE".to_string(),args:vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0}),Expr::Reference(CellID{row:2,col:0})]})), parse_expr("A1/A2 / A3"));
+        
+        assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:
+        vec![
+            Expr::Function{name:"MULTIPLY".to_string(),args:
+            vec![Expr::Reference(CellID{row:0,col:0}),Expr::Reference(CellID{row:1,col:0})
+            ]},
+            Expr::Reference(CellID{row:2,col:0})
+            ]})), parse_expr("A1 * A2 +A3"));
+    assert_eq!(Ok(("",Expr::Function{name:"SUM".to_string(),args:
+            vec![
+                Expr::Reference(CellID{row:0,col:0}),
+                Expr::Function{name:"MULTIPLY".to_string(),args:
+                vec![Expr::Reference(CellID{row:1,col:0}),Expr::Reference(CellID{row:2,col:0})
+                ]},
+                ]})), parse_expr("A1 + A2 * A3"));
+    }
+
+    #[test]
+    fn test_parse_arithmetic_parens(){
+        assert_eq!(Ok(("",Expr::Function{name:"MULTIPLY".to_string(),args:
+        vec![
+            Expr::Reference(CellID{row:0,col:0}),
+            Expr::Function{name:"SUM".to_string(),args:
+            vec![Expr::Reference(CellID{row:1,col:0}),Expr::Reference(CellID{row:2,col:0})
+            ]},
+            ]})), parse_expr("A1 * ( A2 + A3 )"));
     }
 }
