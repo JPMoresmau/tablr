@@ -376,10 +376,7 @@ impl Sheet {
     }
 
     pub fn range_values(&self, range: &CellRange) -> Vec<CellValue> {
-        range.cell_ids().iter().map(|id|  self.cell_value(id)).filter(|v| match v{
-            CellValue::Empty=>false,
-            _=>true,
-        }).collect()
+        range.cell_ids().iter().map(|id|  self.cell_value(id)).filter(|v| !matches!(v, CellValue::Empty)).collect()
     }
 }
 

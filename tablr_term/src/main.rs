@@ -132,7 +132,7 @@ fn eval(state: &mut TablrState, c:Command){
         },
         Command::SetValue(cv)=> {
             let r=state.runtime.set_value(state.current_sheet, state.current_cell,cv);
-            if setresult_ok(&r){
+            if r.is_ok(){
                 state.current_cell=state.current_cell.next_row();
             }
             print_table(&state, Some(&r));
@@ -147,7 +147,7 @@ fn eval(state: &mut TablrState, c:Command){
                 };
             } else {
                 let r=state.runtime.set_formula_str(state.current_sheet, state.current_cell, &f);
-                if setresult_ok(&r){
+                if r.is_ok(){
                     state.current_cell=state.current_cell.next_row();
                 }
                 print_table(&state, Some(&r));
@@ -177,7 +177,7 @@ f | formula <value?> to set a formula for a cell, emtpy value to display the cur
 //}
 
 fn print_errors(r: &SetResult){
-    match r {
+    match &r.0 {
         Err(err) => println!("{}",err),
         Ok(v) => v.iter().for_each(|(c,rc)|{
             match rc {
@@ -220,7 +220,7 @@ fn print_table(state: &TablrState,or: Option<&SetResult>) {
     }
     table.add_row(Row::new(hs));
 
-    let (oks, errs) = or.map(|r| setresult_impactedcells(r)).unwrap_or((HashSet::new(),HashSet::new()));
+    let (oks, errs) = or.map(|r| r.impacted_cells()).unwrap_or((HashSet::new(),HashSet::new()));
 
     for r in 0..max_row {
         let mut row=vec![];

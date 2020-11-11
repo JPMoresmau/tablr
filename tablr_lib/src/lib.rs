@@ -1,3 +1,5 @@
+#![feature(try_trait)]
+
 pub mod types;
 pub mod calc;
 pub mod func;

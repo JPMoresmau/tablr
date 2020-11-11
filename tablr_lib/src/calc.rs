@@ -4,6 +4,7 @@ use crate::func::*;
 use crate::parse::*;
 use thiserror::Error;
 use std::fmt;
+use std::ops::Try;
 
 type CellDependencies = HashMap<CellID,HashSet<CellID>>;
 type FunctionLibrary = HashMap<String, Box<dyn Function>>;
@@ -17,24 +18,50 @@ pub struct Runtime {
 }
 
 pub type CellResult = (CellID,Result<CellValue,EvalError>);
-pub type SetResult = Result<Vec<CellResult>,EvalError>;
+pub type ImpactedCells = (Vec<(CellID,bool)>,Vec<(CellID,bool)>);
 
-pub fn setresult_ok(r: &SetResult) -> bool {
-    match r {
-        Err(_)=>false,
-        Ok(v)=> v.iter().all(|t| t.1.is_ok()),
+#[derive(PartialOrd, PartialEq, Debug, Clone)]
+pub struct SetResult(pub Result<Vec<CellResult>,EvalError>);
+
+impl SetResult {
+
+    pub fn is_ok(&self) -> bool {
+        match &self.0 {
+            Err(_)=>false,
+            Ok(v)=> v.iter().all(|t| t.1.is_ok()),
+        }
     }
-}
 
-pub fn setresult_impactedcells(r: &SetResult) -> (HashSet<CellID>,HashSet<CellID>) {
-    match r {
-        Err(_)=>(HashSet::new(),HashSet::new()),
-        Ok(v)=>{
-            let(ok,err):(Vec<(CellID,bool)>,Vec<(CellID,bool)>) =v.iter().map(|t| (t.0,t.1.is_ok())).partition(|t| t.1);
-            (ok.iter().map(|t| t.0).collect(),err.iter().map(|t| t.0).collect())
+
+    pub fn impacted_cells(&self) -> (HashSet<CellID>,HashSet<CellID>) {
+        match &self.0 {
+            Err(_)=>(HashSet::new(),HashSet::new()),
+            Ok(v)=>{
+                let(ok,err):ImpactedCells =v.iter().map(|t| (t.0,t.1.is_ok())).partition(|t| t.1);
+                (ok.iter().map(|t| t.0).collect(),err.iter().map(|t| t.0).collect())
+            }
         }
     }
 }
+
+impl Try for SetResult {
+    type Ok=Vec<CellResult>;
+    type Error = EvalError;
+
+    fn into_result(self) -> Result<Self::Ok, Self::Error> {
+        self.0
+    }
+
+    fn from_error(e:EvalError)-> Self {
+        Self(Err(e))
+    }
+
+    fn from_ok(v:Vec<CellResult>)-> Self {
+        Self(Ok(v))
+    }
+}
+
+
 
 impl Runtime {
     pub fn new() -> Self {
@@ -49,8 +76,8 @@ impl Runtime {
     pub fn set_value(&mut self, sheet_idx: usize, id: CellID, value: CellValue) -> SetResult {
         let os = self.workbook.sheets.get_mut(sheet_idx);
         match os{
-            None => Err(EvalError::InvalidSheetIndex(sheet_idx)),
-            Some(sheet) => Ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, id, value, true))
+            None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
+            Some(sheet) => SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, id, value, true))
         }
     }
 
@@ -60,16 +87,16 @@ impl Runtime {
                 if rest.is_empty() {
                     self.set_formula(sheet_idx, id, expr)
                 } else {
-                    Err(EvalError::UnexpectedLeftover(rest.to_string()))
+                    SetResult::from_error(EvalError::UnexpectedLeftover(rest.to_string()))
                 }
-            Err(err) =>  Err(EvalError::IncorrectFormula(format!("{}",err))),
+            Err(err) =>  SetResult::from_error(EvalError::IncorrectFormula(format!("{}",err))),
         }
     }
 
     pub fn set_formula(&mut self, sheet_idx: usize, id: CellID, formula: Expr) -> SetResult {
         let os = self.workbook.sheets.get_mut(sheet_idx);
         match os{
-            None => Err(EvalError::InvalidSheetIndex(sheet_idx)),
+            None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
             Some(sheet) => {
                 let t= format!("{}",formula);
                 let deps = &mut self.dependencies;
@@ -95,7 +122,7 @@ impl Runtime {
 
                 let new_value =runtime_sheet_eval(&self.functions, sheet, &formula)?;
 
-                Ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, id, new_value, false))
+                SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, id, new_value, false))
             }
         }
     }
@@ -133,7 +160,7 @@ impl Runtime {
                     }
                 }
             }
-            ret.push(Ok(res));
+            ret.push(SetResult::from_ok(res));
         }
         ret
     }
@@ -361,18 +388,18 @@ mod tests {
         
         let id1 = CellID::from_str("A1").unwrap();
         let ret1=r.set_value(0, id1, CellValue::Integer(1));
-        assert_eq!(Ok(vec![(id1,Ok(CellValue::Integer(1)))]),ret1);
+        assert_eq!(SetResult::from_ok(vec![(id1,Ok(CellValue::Integer(1)))]),ret1);
         
         let id2 = CellID::from_str("A2").unwrap();
         let ret2= r.set_value(0, id2, CellValue::Integer(1));
-        assert_eq!(Ok(vec![(id2,Ok(CellValue::Integer(1)))]),ret2);
+        assert_eq!(SetResult::from_ok(vec![(id2,Ok(CellValue::Integer(1)))]),ret2);
 
         let id3 = CellID::from_str("A3").unwrap();
         let ret3 = r.set_formula_str(0, id3, "SUM(A1,A2)");
-        assert_eq!(Ok(vec![(id3,Ok(CellValue::Integer(2)))]),ret3);
+        assert_eq!(SetResult::from_ok(vec![(id3,Ok(CellValue::Integer(2)))]),ret3);
 
         let ret1=r.set_value(0, id1, CellValue::Integer(2));
-        assert_eq!(Ok(vec![(id1,Ok(CellValue::Integer(2))),(id3,Ok(CellValue::Integer(3)))]),ret1);
+        assert_eq!(SetResult::from_ok(vec![(id1,Ok(CellValue::Integer(2))),(id3,Ok(CellValue::Integer(3)))]),ret1);
     }
 
     #[test]
@@ -410,7 +437,7 @@ mod tests {
         
         let id1 = CellID::from_str("A1").unwrap();
         let ret1 = r.set_formula(0, id1, Expr::Reference(id1));
-        assert_eq!(Err(EvalError::CycleDetected(CellIDVec{ids:vec![id1]})), ret1);
+        assert_eq!(SetResult::from_error(EvalError::CycleDetected(CellIDVec{ids:vec![id1]})), ret1);
 
         let id2 = CellID::from_str("A2").unwrap();
 
@@ -418,7 +445,7 @@ mod tests {
         assert!(ret1.is_ok());
 
         let ret2 = r.set_formula(0, id2, Expr::Reference(id1));
-        assert_eq!(Err(EvalError::CycleDetected(CellIDVec{ids:vec![id2,id1,id2]})), ret2);
+        assert_eq!(SetResult::from_error(EvalError::CycleDetected(CellIDVec{ids:vec![id2,id1,id2]})), ret2);
 
     }
 
