@@ -11,13 +11,13 @@ The world runs on spreadsheets it seems, so here's another take at writing a spr
     - basic colors: green when a cell was just changed, red if a cell is in error
     - load/save
     - uses rustyline so does not work on MingGW terminal on Windows
+    - Copy and paste between cells including formula rewriting
 - A few numeric functions: SUM, MINUS, TIMES, DIVIDE, AVERAGE
     - Support direct arithmetic like A1+A2, and parens
 
 ## TODO
 
 - Support test: the library supports having test cells, but nothing is implemented yet. The idea is to be able to have copies of sheets where you cannot change formulas, but you can put values in cell and indicate which values should the formula yield, kind of built in unit tests for your spreadsheet
-- Copy and paste between cells including formula rewriting
 - Provide loads more functions and a way to register your own functions
 
 
