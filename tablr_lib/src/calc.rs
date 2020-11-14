@@ -82,47 +82,28 @@ impl Runtime {
     }
 
     pub fn set_formula_str(&mut self, sheet_idx: usize, id: CellID, formula: &str) -> SetResult {
-        match parse_expr(formula){
-            Ok((rest,expr)) => 
-                if rest.is_empty() {
-                    self.set_formula(sheet_idx, id, expr)
-                } else {
-                    SetResult::from_error(EvalError::UnexpectedLeftover(rest.to_string()))
-                }
-            Err(err) =>  SetResult::from_error(EvalError::IncorrectFormula(format!("{}",err))),
+        match parse_cached_expr(&mut self.formulas, formula){
+            Ok(expr) => self.set_formula_with_text(sheet_idx, id, formula.to_string(), expr),
+            Err(err) =>  SetResult::from_error(err),
         }
     }
 
+    
+
     pub fn set_formula(&mut self, sheet_idx: usize, id: CellID, formula: Expr) -> SetResult {
+        let t = format!("{}",formula);
+        if !self.formulas.contains_key(&t){
+            self.formulas.insert(t.clone(),formula.clone());
+        }
+        self.set_formula_with_text(sheet_idx, id,  format!("{}",formula), formula)
+    }
+
+    pub fn set_formula_with_text(&mut self, sheet_idx: usize, id: CellID, text: String, formula: Expr) -> SetResult {
         let os = self.workbook.sheets.get_mut(sheet_idx);
         match os{
             None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
             Some(sheet) => {
-                let t= format!("{}",formula);
-                let deps = &mut self.dependencies;
-
-                runtime_check(&self.formulas,sheet, id, &formula)?;
-
-                self.formulas.insert(t.clone(), formula.clone());
-                let e=sheet.cells.0.entry(id)
-                    .or_insert(Cell{id,value:CellValue::Empty,formula:None});
-                if let Some(oldt) = e.formula.take() {
-                    if let Some(olde) = self.formulas.get(&oldt){
-                        let mut orefs=HashSet::new();
-                        olde.get_references(&mut orefs);
-                        orefs.iter().for_each(|cid| {deps.get_mut(cid).map(|v| v.remove(&id));}
-                            );
-                    }
-                }
-                e.formula=Some(t);
-                
-                let mut refs=HashSet::new();
-                formula.get_references(&mut refs);
-                refs.iter().for_each(|cid| {deps.entry(*cid).or_insert_with(HashSet::new).insert(id);});
-
-                let new_value =runtime_sheet_eval(&self.functions, sheet, &formula)?;
-
-                SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, id, new_value, false))
+                set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas, sheet, id, text, formula)
             }
         }
     }
@@ -164,12 +145,82 @@ impl Runtime {
         }
         ret
     }
+
+    pub fn copy_cell(&mut self, sheet_idx: usize, from: CellID, to: CellID) -> SetResult {
+        let os = self.workbook.sheets.get_mut(sheet_idx);
+        match os{
+            None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
+            Some(sheet) => {
+                let ocell= sheet.get_cell(&from).map(|c| (c.value.clone(),c.formula.clone()));
+                match ocell {
+                    None=> SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, to, CellValue::Empty, true)),
+                    Some((v,of))=> {
+                        match of {
+                            None =>SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, to, v, true)),
+                            Some (s)=> {
+                                match parse_cached_expr(&mut self.formulas, &s){
+                                    Ok(expr) => set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas, sheet, to, s.clone(), expr.copy(from,to)),
+                                    Err(err) =>  SetResult::from_error(err),
+                                }
+                            }
+                        }
+                    },
+                }
+
+            },
+        }
+    }
 }
 
 impl Default for Runtime {
     fn default() -> Self {
         Runtime::new()
     }
+}
+
+fn parse_cached_expr(formulas: &mut FormulaCache,formula: &str ) -> Result<Expr,EvalError> {
+    match formulas.get(formula){
+        Some(expr)=> Ok(expr.clone()),
+        None => {
+            match parse_expr(formula){
+                Ok((rest,expr)) => 
+                    if rest.is_empty() {
+                        formulas.insert(formula.to_string(), expr.clone());
+                        Ok(expr)
+                    } else {
+                        Err(EvalError::UnexpectedLeftover(rest.to_string()))
+                    }
+                Err(err) =>  Err(EvalError::IncorrectFormula(format!("{}",err))),
+            }
+        }
+    }
+
+} 
+
+pub fn set_formula_with_text(functions: &FunctionLibrary, dependencies: &mut CellDependencies, formulas: &FormulaCache, sheet: &mut Sheet, id: CellID, text: String, formula: Expr) -> SetResult {
+    
+    runtime_check(formulas,sheet, id, &formula)?;
+
+    let e=sheet.cells.0.entry(id)
+        .or_insert(Cell{id,value:CellValue::Empty,formula:None});
+    if let Some(oldt) = e.formula.take() {
+        if let Some(olde) = formulas.get(&oldt){
+            let mut orefs=HashSet::new();
+            olde.get_references(&mut orefs);
+            orefs.iter().for_each(|cid| {dependencies.get_mut(cid).map(|v| v.remove(&id));}
+                );
+        }
+    }
+    e.formula=Some(text);
+    
+    let mut refs=HashSet::new();
+    formula.get_references(&mut refs);
+    refs.iter().for_each(|cid| {dependencies.entry(*cid).or_insert_with(HashSet::new).insert(id);});
+
+    let new_value =runtime_sheet_eval(functions, sheet, &formula)?;
+
+    SetResult::from_ok(set_sheet_value(functions, dependencies, formulas, sheet, id, new_value, false))
+
 }
 
 fn set_sheet_value(functions: &FunctionLibrary, dependencies: &CellDependencies, formulas: &FormulaCache, sheet: &mut Sheet, id: CellID, value: CellValue, remove_formula: bool) -> Vec<(CellID,Result<CellValue,EvalError>)>{
@@ -220,6 +271,21 @@ impl Expr {
             Expr::Range(range) => range.cell_ids().into_iter().for_each(|id| {v.insert(id);}),
             Expr::Function{name:_name, args}=>args.iter().for_each(|e| e.get_references(v)),
             _ => (),
+        }
+    }
+
+    pub fn copy(&self, from: CellID, to: CellID) -> Expr{
+        let delta_col: i64 = to.col as i64 - from.col as i64;
+        let delta_row: i64 = to.row as i64 - from.row as i64;
+        self.translate(delta_col, delta_row)
+    }
+
+    fn translate(&self, delta_col: i64, delta_row: i64) -> Expr {
+        match self {
+            Expr::Reference(id)=> Expr::Reference(id.translate(delta_col, delta_row)),
+            Expr::Range(range) => Expr::Range(range.translate(delta_col, delta_row)),
+            Expr::Function{name, args}=>Expr::Function{name:name.clone(),args:args.iter().map(|e| e.translate(delta_col,delta_row)).collect()},
+            Expr::Value(v)=>Expr::Value(v.clone()),
         }
     }
 }
@@ -380,6 +446,21 @@ mod tests {
         assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(id1),Expr::Reference(id2)]}));
         assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:id1,to:id2})]}));
 
+    }
+
+    #[test]
+    fn test_translate_expr(){
+        let id1=CellID::from_str("A1").unwrap();
+        let id2=CellID::from_str("C1").unwrap();
+        let f1 = Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(id1),Expr::Reference(id2)]};
+        let f2 = Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:id1,to:id2})]};
+        let id3=CellID::from_str("A2").unwrap();
+        let id4=CellID::from_str("C2").unwrap();
+        let f3 = Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(id3),Expr::Reference(id4)]};
+        let f4 = Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:id3,to:id4})]};
+        assert_eq!(f3,f1.translate(0, 1));
+        assert_eq!(f4,f2.translate(0, 1));
+        
     }
 
     #[test]

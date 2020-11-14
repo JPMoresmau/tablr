@@ -46,6 +46,12 @@ impl CellID {
             };
         CellID{col:nc,row:self.row}
     }
+
+    pub fn translate(&self, delta_col: i64, delta_row: i64) -> CellID {
+        let new_col=(self.col as i64 + delta_col).max(0) as usize;
+        let new_row=(self.row as i64 + delta_row).max(0) as usize;
+        CellID{col:new_col,row:new_row}
+    }
 }
 
 impl fmt::Display for CellID {
@@ -198,6 +204,10 @@ pub struct CellRange {
 impl CellRange {
     pub fn cell_ids(&self) -> Vec<CellID> {
         (self.from.row ..= self.to.row).flat_map(|r| (self.from.col ..= self.to.col).map(move |c| CellID{row:r,col:c})).collect()
+    }
+
+    pub fn translate(&self, delta_col: i64, delta_row: i64) -> CellRange {
+        CellRange{from:self.from.translate(delta_col, delta_row),to:self.to.translate(delta_col, delta_row)}
     }
 }
 
@@ -470,6 +480,15 @@ mod tests {
     }
 
     #[test]
+    fn translate_cellid(){
+        assert_eq!(CellID::from_str("A1"),CellID::from_str("A1").map(|c| c.translate(-1,-1)));
+        assert_eq!(CellID::from_str("A2"),CellID::from_str("A1").map(|c| c.translate(0,1)));
+        assert_eq!(CellID::from_str("B1"),CellID::from_str("A1").map(|c| c.translate(1,0)));
+        assert_eq!(CellID::from_str("A1"),CellID::from_str("A2").map(|c| c.translate(0,-1)));
+        assert_eq!(CellID::from_str("A1"),CellID::from_str("B1").map(|c| c.translate(-1,0)));
+    }
+
+    #[test]
     fn test_parse_range(){
         assert_eq!(Ok(CellRange{from:CellID{row:0,col:0},to:CellID{row:0,col:1}}), CellRange::from_str("A1:B1"));
     }
@@ -489,6 +508,12 @@ mod tests {
         assert_eq!(expected.iter().map(|s| CellID::from_str(s).unwrap()).collect::<Vec<CellID>>(),CellRange{from:CellID::from_str(from).unwrap(),to: CellID::from_str(to).unwrap()}.cell_ids());
     }
 
+    #[test]
+    fn translate_rangeid(){
+        assert_eq!(CellRange::from_str("B1:B3"),CellRange::from_str("A1:A3").map(|c| c.translate(1,0)));
+        assert_eq!(CellRange::from_str("A2:C2"),CellRange::from_str("A1:C1").map(|c| c.translate(0,1)));
+
+    }
 
     #[test]
     fn test_sheet_size() {

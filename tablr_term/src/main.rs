@@ -154,6 +154,14 @@ fn eval(state: &mut TablrState, c:Command){
                 print_errors(&r);
             }
         },
+        Command::Copy(from)=> {
+            let r=state.runtime.copy_cell(state.current_sheet, from,state.current_cell);
+            if r.is_ok(){
+                state.current_cell=state.current_cell.next_row();
+            }
+            print_table(&state, Some(&r));
+            print_errors(&r);
+        }
     }
 }
 
@@ -163,6 +171,7 @@ s | save <path?> to save to a path (save to previous path if not provided)
 lc | loadcsv <headerCount> <column types> <path> to load a CSV file: lc 1 t i example.csv loads a file with one row of headers, first column is text, second column is integer
 sc | savecsv <path?> to save to a CSV file
 c | choose <cellid> to choose a cell: c A2
+cp | copy <cellid> to copy value and formula from cellid to current cell (formula gets translated)
 t | text <value?> to set a text value to a cell
 i | int <value?> to set an integer value to a cell
 f | float <value?> to set an float value to a cell

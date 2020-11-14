@@ -20,11 +20,12 @@ pub enum Command {
     Choose(CellID),
     SetValue(CellValue),
     SetFormula(String),
+    Copy(CellID),
     Error(String),
 }
 
 pub fn parse_command(input: &str) -> IResult<&str, Command> {
-    alt((parse_io,parse_quit,parse_help,parse_formula,parse_choose,parse_value))(input)
+    alt((parse_io,parse_quit,parse_help,parse_copy,parse_formula,parse_choose,parse_value))(input)
 }
 
 fn parse_io(input: &str) -> IResult<&str, Command> {
@@ -80,6 +81,13 @@ fn parse_quit(input: &str) -> IResult<&str, Command> {
 fn parse_help(input: &str) -> IResult<&str, Command> {
     let (input,_)=alt((tag("help"),tag("h"),tag("?")))(input)?;
     Ok((input,Command::Help))
+}
+
+fn parse_copy(input: &str) -> IResult<&str, Command> {
+    let (input,_)=alt((tag("copy"),tag("cp")))(input)?;
+    let (input,_)=space1(input)?;
+    let (input,from) = parse_id(input)?;
+    Ok((input,Command::Copy(from)))
 }
 
 fn parse_formula(input: &str) -> IResult<&str, Command> {
