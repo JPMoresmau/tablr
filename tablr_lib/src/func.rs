@@ -8,6 +8,8 @@ pub enum FunctionError {
     InvalidArgs(usize,CellValue),
     #[error("Unexpected intermediate value: {0}")]
     UnexpectedValue(CellValue),
+    #[error("Wrong number of arguments: {0}, expected at least {1}")]
+    WrongNumberOfArgument(usize,usize),
     #[error("Unknown function error")]
     Unknown,
 }
@@ -42,11 +44,6 @@ fn binary_function<B>(binary: &B, args: Vec<CellValue>) -> Result<CellValue, Fun
     ret.ok_or(FunctionError::Unknown)
 }
 
-impl <T:Binary> Function for T {
-    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
-        binary_function(self, args)
-     }
-}
 
 pub fn built_in_functions() -> HashMap<String, Box<dyn Function>> {
     let mut m: HashMap<String, Box<dyn Function>> = HashMap::new();
@@ -59,6 +56,8 @@ pub fn built_in_functions() -> HashMap<String, Box<dyn Function>> {
     m.insert("DIVIDE".to_string(), Box::new(Divide));
     m.insert("AVERAGE".to_string(), Box::new(Average));
     m.insert("AVG".to_string(), Box::new(Average));
+    m.insert("MAX".to_string(), Box::new(Max));
+    m.insert("MIN".to_string(), Box::new(Min));
     m
 }
 
@@ -88,6 +87,13 @@ impl Binary for Add {
     }
 }
 
+impl Function for Add {
+    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
+        binary_function(self, args)
+     }
+}
+
+
 struct Substract;
 
 impl Binary for Substract {
@@ -112,6 +118,12 @@ impl Binary for Substract {
             _ => None,
         }
     }
+}
+
+impl Function for Substract {
+    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
+        binary_function(self, args)
+     }
 }
 
 struct Multiply;
@@ -140,6 +152,12 @@ impl Binary for Multiply {
     }
 }
 
+impl Function for Multiply {
+    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
+        binary_function(self, args)
+     }
+}
+
 struct Divide;
 
 impl Binary for Divide {
@@ -166,6 +184,12 @@ impl Binary for Divide {
     }
 }
 
+impl Function for Divide {
+    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
+        binary_function(self, args)
+     }
+}
+
 struct Average;
 
 impl Function for Average {
@@ -180,6 +204,89 @@ impl Function for Average {
 
 }
 
+pub trait NumericFold : Sized{
+    fn int_cmp(&self, i1: i128, i2: i128) -> i128;
+    fn float_cmp(&self, f1: f64, f2: f64) -> f64;
+    
+}
+
+fn fold_calculate<N>(nb: &N, args: Vec<CellValue>) -> Result<CellValue, FunctionError> where N: NumericFold{
+    let l = args.len();
+    if l==0 {
+        return Err(FunctionError::WrongNumberOfArgument(0,1));
+    }
+    let mut int_ret: Option<i128>=None;
+    let mut float_ret: Option<f64>=None;
+    for (idx,v) in args.into_iter().enumerate() {
+        match v {
+            CellValue::Integer(i) => {
+                if let Some(m) = int_ret {
+                    int_ret=Some(nb.int_cmp(m,i));
+                } else if let Some(m) = float_ret {
+                    float_ret=Some(nb.float_cmp(m, i as f64));
+                } else {
+                    int_ret=Some(i);
+                }
+            },
+            CellValue::Float(f) => {
+                if let Some(m) = int_ret {
+                    float_ret=Some(nb.float_cmp(m as f64, f));
+                    int_ret=None;
+                } else if let Some(m) = float_ret {
+                    float_ret=Some(nb.float_cmp(m, f));
+                } else {
+                    float_ret=Some(f);
+                }
+            },
+            CellValue::Empty => {},
+            cv => return Err(FunctionError::InvalidArgs(idx,cv)),
+        }
+    }
+    if let Some(m) = int_ret {
+        Ok(CellValue::Integer(m))
+    } else if let Some(m) = float_ret {
+        Ok(CellValue::Float(m))
+    } else {
+        return Err(FunctionError::WrongNumberOfArgument(0,1));
+    }
+}
+
+
+struct Max;
+
+impl NumericFold for Max {
+    fn int_cmp(&self, i1: i128, i2: i128) -> i128{
+        i1.max(i2)
+    }
+    fn float_cmp(&self, f1: f64, f2: f64) -> f64{
+        f1.max(f2)
+    }
+    
+}
+
+impl Function for Max {
+    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
+       fold_calculate(self, args)
+    }
+}
+
+struct Min;
+
+impl NumericFold for Min {
+    fn int_cmp(&self, i1: i128, i2: i128) -> i128{
+        i1.min(i2)
+    }
+    fn float_cmp(&self, f1: f64, f2: f64) -> f64{
+        f1.min(f2)
+    }
+    
+}
+
+impl Function for Min {
+    fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError> {
+       fold_calculate(self, args)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -202,5 +309,14 @@ mod tests {
         let s= Average;
         assert_eq!(Ok(CellValue::Float(1.5)), s.calculate(vec![CellValue::Float(1.0),CellValue::Float(2.0)]));
         assert_eq!(Err(FunctionError::InvalidArgs(1,CellValue::Text("a".to_string()))), s.calculate(vec![CellValue::Integer(1),CellValue::Text("a".to_string())]));
+    }
+
+    #[test]
+    fn test_min_max(){
+       assert_eq!(Ok(CellValue::Float(2.0)), Max.calculate(vec![CellValue::Integer(1),CellValue::Empty,CellValue::Float(2.0)]));
+       assert_eq!(Ok(CellValue::Float(1.0)), Min.calculate(vec![CellValue::Integer(1),CellValue::Empty,CellValue::Float(2.0)]));
+       assert_eq!(Ok(CellValue::Integer(2)), Max.calculate(vec![CellValue::Integer(1),CellValue::Empty,CellValue::Integer(2)]));
+       assert_eq!(Ok(CellValue::Integer(1)), Min.calculate(vec![CellValue::Integer(1),CellValue::Empty,CellValue::Integer(2)]));
+       
     }
 }

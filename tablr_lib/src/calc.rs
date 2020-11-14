@@ -14,7 +14,7 @@ pub struct Runtime {
     pub workbook: Workbook,
     formulas: FormulaCache,
     dependencies: CellDependencies,
-    functions: FunctionLibrary,
+    pub functions: FunctionLibrary,
 }
 
 pub type CellResult = (CellID,Result<CellValue,EvalError>);
@@ -542,5 +542,30 @@ mod tests {
         assert_eq!(CellValue::Integer(3),r.workbook.sheets[0].cell_value(&id2));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_custom_fn() -> Result<(),EvalError>{
+        let r=&mut Runtime::new();
+        
+        let id1 = CellID::from_str("A1").unwrap();
+        r.set_value(0, id1, CellValue::Integer(1))?;
+               
+        let id2 = CellID::from_str("A2").unwrap();
+
+        r.functions.insert("ARGLENTEST".to_string(), Box::new(TestFn));
+
+        r.set_formula_str(0, id2, "ARGLENTEST(A1,2)")?;
+        assert_eq!(CellValue::Integer(2),r.workbook.sheets[0].cell_value(&id2));
+
+        Ok(())
+    }
+
+    struct TestFn;
+
+    impl Function for TestFn {
+        fn calculate(&self, args: Vec<CellValue>) -> Result<CellValue, FunctionError>{
+            Ok(CellValue::Integer(args.len() as i128))
+        }
     }
 }

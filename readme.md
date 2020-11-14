@@ -12,13 +12,14 @@ The world runs on spreadsheets it seems, so here's another take at writing a spr
     - load/save
     - uses rustyline so does not work on MingGW terminal on Windows
     - Copy and paste between cells including formula rewriting
-- A few numeric functions: SUM, MINUS, TIMES, DIVIDE, AVERAGE
+- A few numeric functions: SUM, MINUS, TIMES, DIVIDE, AVERAGE, MIN, MAX
     - Support direct arithmetic like A1+A2, and parens
+    - You can register your own function (runtime.functions, add an instance of the Function trait)
 
 ## TODO
 
 - Support test: the library supports having test cells, but nothing is implemented yet. The idea is to be able to have copies of sheets where you cannot change formulas, but you can put values in cell and indicate which values should the formula yield, kind of built in unit tests for your spreadsheet
-- Provide loads more functions and a way to register your own functions
+
 
 
 ## Getting started
