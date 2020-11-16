@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::fmt;
+//use std::marker::PhantomData;
 use serde::{Deserialize, Serialize};
-use serde::ser::{Serializer, SerializeSeq};
-use serde::de::{Deserializer, Visitor, SeqAccess};
+use serde::ser::{Serializer};
+use serde::de::{Deserializer, Visitor, Error};
 use thiserror::Error;
 use chrono::{DateTime,Local, ParseError};
 
@@ -22,10 +23,45 @@ pub fn column_name(col: usize) -> String {
     v.iter().collect::<String>()
 }
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub struct CellID {
     pub col: usize,
     pub row: usize,
+}
+
+impl Serialize for CellID {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+struct CellIDvisitor;
+
+impl<'de> Visitor<'de> for CellIDvisitor {
+    type Value = CellID;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("cellid")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+            E: Error, {
+        CellID::from_str(v).map_err(Error::custom)
+    }   
+
+}
+
+impl<'de> Deserialize<'de> for CellID {
+    fn deserialize<D>(deserializer: D) -> Result<CellID, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(CellIDvisitor)
+    }
 }
 
 impl CellID {
@@ -114,33 +150,46 @@ impl FromStr for CellID {
     }
 }
 
+/*pub trait CellIDOwner {
+    fn id(&self) -> CellID;
+}*/
 
 #[derive(Clone, PartialOrd, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Cell {
-    pub id: CellID,
+pub struct Cell<T> {
+    //pub id: CellID,
     pub value: CellValue,
-    pub formula: Option<String>,
+    pub dynamic: T,
 }
 
-impl Cell {
-    pub fn new(id: &str, value: CellValue) -> Self{
-        Cell{id: CellID::from_str(id).unwrap(),value,formula:None}
+pub type ProdCell = Cell<Option<String>>;
+pub type TestCell = Cell<CellValue>;
+
+impl ProdCell {
+    //id: &str,
+    //id: CellID::from_str(id).unwrap(), 
+    pub fn new(value: CellValue) -> ProdCell {
+        Cell{value,dynamic:None}
     }
 }
+/*
+impl CellIDOwner for Cell {
+    fn id(&self) -> CellID { 
+        self.id
+    }
+}*/
 
-#[derive(Clone, PartialOrd, PartialEq, Debug, Serialize, Deserialize)]
+/*#[derive(Clone, PartialOrd, PartialEq, Debug, Serialize, Deserialize)]
 pub struct TestCell {
-    pub id: CellID,
+   // pub id: CellID,
     pub value: CellValue,
     pub expected: CellValue,
-}
-
+}*/
 /*
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Formula{
-    pub text: String,
-}
-*/
+impl CellIDOwner for TestCell {
+    fn id(&self) -> CellID { 
+        self.id
+    }
+}*/
 
 #[derive(Clone, PartialOrd, PartialEq, Debug, Serialize, Deserialize)]
 pub enum CellValue {
@@ -288,79 +337,26 @@ impl FromStr for CellRange {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct CellMap(pub HashMap<CellID,Cell>);
-
-impl Serialize for CellMap{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer, {
-        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
-        for e in self.0.values() {
-            seq.serialize_element(e)?;
-        }
-        seq.end()
-    }
-}
-
-struct CellMapVisitor;
-
-impl<'de> Visitor<'de> for CellMapVisitor {
-    type Value = CellMap;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("id: cellid")
-    }
-
-    fn visit_seq<S>(self, mut access: S) -> Result<Self::Value, S::Error>
-    where
-        S: SeqAccess<'de>,
-    {
-        let mut items = HashMap::with_capacity(access.size_hint().unwrap_or(0));
-        while let Some(cell) = access.next_element::<Cell>()? {
-            items.insert(cell.id, cell);
-        }
-        Ok(CellMap(items))
-    }
-}
-
-impl<'de> Deserialize<'de> for CellMap {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_seq(CellMapVisitor{})
-    }
-}
-
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Sheet {
+pub struct CellMap<T>{
     pub metadata: Metadata,
-    pub cells:CellMap,
-    pub tests:HashMap<String,CellMap>,
+    pub cells: HashMap<CellID,Cell<T>>,
 }
 
-impl Sheet {
-    pub fn new()-> Self {
-        Sheet{
-            metadata: Metadata::new(),
-            cells: CellMap(HashMap::new()),
-            tests: HashMap::new(),
-        }
+impl <T> CellMap<T> {
+    pub fn get_cell<'a>(&'a self, id: &CellID ) -> Option<&'a Cell<T>> {
+        self.cells.get(id)
     }
 
-    pub fn get_cell<'a>(&'a self, id: &CellID ) -> Option<&'a Cell> {
-        self.cells.0.get(id)
-    }
-
-    pub fn set_cell_value(&mut self, id: &CellID, value: CellValue) {
-        let myid=*id;
-        self.cells.0.entry(myid).or_insert(Cell{id:myid,value:CellValue::Empty,formula:None}).value=value;
+    pub fn set_cell_value(&mut self, id: &CellID, value: CellValue, dynamic: T) {
+        //let myid=*id;
+        self.cells.entry(*id).or_insert(Cell{value:CellValue::Empty,dynamic}).value=value;
         self.calc_size(id);
     }
 
-    pub fn set_cell(&mut self, cell: Cell) -> CellID {
-        let id = cell.id;
-        self.cells.0.insert(cell.id,cell);
+    pub fn set_cell(&mut self, id: CellID, cell: Cell<T>) -> CellID {
+        //let id = cell.id;
+        self.cells.insert(id.clone(),cell);
         self.calc_size(&id);
         id
     }
@@ -388,6 +384,71 @@ impl Sheet {
     pub fn range_values(&self, range: &CellRange) -> Vec<CellValue> {
         range.cell_ids().iter().map(|id|  self.cell_value(id)).filter(|v| !matches!(v, CellValue::Empty)).collect()
     }
+}
+
+pub type ProdCellMap = CellMap<Option<String>>;
+pub type TestCellMap = CellMap<CellValue>;
+
+
+/*
+impl<T:Serialize> Serialize for CellMap<T>{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer, {
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for e in self.0.values() {
+            seq.serialize_element(e)?;
+        }
+        seq.end()
+    }
+}
+
+struct CellMapVisitor<T>{
+    data: PhantomData<T>,
+}
+
+impl<'de, T:CellIDOwner + Deserialize<'de>> Visitor<'de> for CellMapVisitor<T> {
+    type Value = CellMap<T>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("id: cellid")
+    }
+
+    fn visit_seq<S>(self, mut access: S) -> Result<Self::Value, S::Error>
+    where
+        S: SeqAccess<'de>,
+    {
+        let mut items = HashMap::with_capacity(access.size_hint().unwrap_or(0));
+        while let Some(cell) = access.next_element::<T>()? {
+            items.insert(cell.id(), cell);
+        }
+        Ok(CellMap(items))
+    }
+}
+
+impl<'de, T:CellIDOwner + Deserialize<'de>> Deserialize<'de> for CellMap<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(CellMapVisitor{data:PhantomData})
+    }
+}*/
+
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Sheet {
+    pub cells:ProdCellMap,
+    pub tests:HashMap<String,TestCellMap>,
+}
+
+impl Sheet {
+    pub fn new()-> Self {
+        Sheet{
+            cells: CellMap{metadata: Metadata::new(),cells:HashMap::new()},
+            tests: HashMap::new(),
+        }
+    }
+
+    
 }
 
 impl Default for Sheet {
@@ -518,17 +579,17 @@ mod tests {
     #[test]
     fn test_sheet_size() {
         let mut s=Sheet::new();
-        assert_eq!((0,0),s.metadata.size());
-        s.set_cell(Cell::new("A1", CellValue::Text("Name".to_string())));
-        assert_eq!((1,1),s.metadata.size());
-        s.set_cell( Cell::new("B1", CellValue::Text("Value".to_string())));
-        assert_eq!((2,1),s.metadata.size());
-        s.set_cell(Cell::new("A2", CellValue::Integer(1)));
-        assert_eq!((2,2),s.metadata.size());
-        s.set_cell( Cell::new("B2", CellValue::Integer(2)));
-        assert_eq!((2,2),s.metadata.size());
-        s.set_cell(Cell::new("A3", CellValue::Integer(3)));
-        assert_eq!((2,3),s.metadata.size());
+        assert_eq!((0,0),s.cells.metadata.size());
+        s.cells.set_cell(CellID::from_str("A1").unwrap(), Cell::new(CellValue::Text("Name".to_string())));
+        assert_eq!((1,1),s.cells.metadata.size());
+        s.cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new( CellValue::Text("Value".to_string())));
+        assert_eq!((2,1),s.cells.metadata.size());
+        s.cells.set_cell(CellID::from_str("A2").unwrap(),Cell::new(CellValue::Integer(1)));
+        assert_eq!((2,2),s.cells.metadata.size());
+        s.cells.set_cell( CellID::from_str("B2").unwrap(),Cell::new(CellValue::Integer(2)));
+        assert_eq!((2,2),s.cells.metadata.size());
+        s.cells.set_cell(CellID::from_str("A3").unwrap(),Cell::new(CellValue::Integer(3)));
+        assert_eq!((2,3),s.cells.metadata.size());
 
     }
 }

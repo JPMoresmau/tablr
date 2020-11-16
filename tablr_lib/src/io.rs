@@ -45,12 +45,12 @@ pub fn save_csv<P: AsRef<Path> + Display>(sheet: &Sheet, path: &P) -> Result<(),
 
 pub fn save_csv_writer<W: Write>(sheet: &Sheet, w: W) -> Result<(),IOError> {
     let mut wtr = WriterBuilder::new().from_writer(w);
-    let mut row = Vec::with_capacity(sheet.metadata.size().0);
+    let mut row = Vec::with_capacity(sheet.cells.metadata.size().0);
     
-    for r in 0..sheet.metadata.size().1 {
+    for r in 0..sheet.cells.metadata.size().1 {
         row.clear();
-        for c in 0..sheet.metadata.size().0 {
-            row.push(match sheet.cells.0.get(&CellID{col:c,row:r}) {
+        for c in 0..sheet.cells.metadata.size().0 {
+            row.push(match sheet.cells.cells.get(&CellID{col:c,row:r}) {
                 Some(cell) =>format!("{}",cell.value),
                 None =>String::new(),
             });
@@ -71,7 +71,7 @@ pub fn load<P: AsRef<Path>+Display>(path:&P) -> Result<Workbook,IOError> {
 pub fn load_csv<P: AsRef<Path>+Display>(path:&P, desc: &InputDescription) -> Result<Sheet,IOError> {
     let mut rdr = ReaderBuilder::new().has_headers(false).flexible(true).from_path(path).map_err(|e| IOError::OpenCSVError(format!("{}",path),e))?;
     let mut sheet = Sheet::new();
-    sheet.metadata.headers=desc.headers;
+    sheet.cells.metadata.headers=desc.headers;
     
     let def = CellValue::Text(String::new());
     for (row,result) in rdr.records().enumerate() {
@@ -90,7 +90,7 @@ pub fn load_csv<P: AsRef<Path>+Display>(path:&P, desc: &InputDescription) -> Res
                 
                 template_value.parse_similar(field).map_err(|e| IOError::ParseCSVFieldError(id,e))?
             };
-            sheet.set_cell_value(&id, cell_value);
+            sheet.cells.set_cell_value(&id, cell_value, None);
         }
     }
     Ok(sheet)
@@ -102,15 +102,16 @@ pub fn load_csv<P: AsRef<Path>+Display>(path:&P, desc: &InputDescription) -> Res
 mod tests {
     use super::*;
     use std::fs::{remove_file, read};
+    use std::str::FromStr;
 
     #[test]
     fn test_save_load()-> Result<(),IOError> {
         let mut w=Workbook::new();
-        w.sheets[0].set_cell(Cell::new("A1", CellValue::Text("Name".to_string())));
-        w.sheets[0].set_cell( Cell::new("B1", CellValue::Text("Value".to_string())));
-        w.sheets[0].set_cell(Cell::new("A2", CellValue::Integer(1)));
-        w.sheets[0].set_cell( Cell::new("B2", CellValue::Integer(2)));
-        w.sheets[0].metadata.headers=1;
+        w.sheets[0].cells.set_cell(CellID::from_str("A1").unwrap(),Cell::new(CellValue::Text("Name".to_string())));
+        w.sheets[0].cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new(CellValue::Text("Value".to_string())));
+        w.sheets[0].cells.set_cell(CellID::from_str("A2").unwrap(),Cell::new(CellValue::Integer(1)));
+        w.sheets[0].cells.set_cell( CellID::from_str("B2").unwrap(),Cell::new(CellValue::Integer(2)));
+        w.sheets[0].cells.metadata.headers=1;
 
         let p="workbook.tablr.json";
         save(&w, &p)?;
@@ -123,12 +124,12 @@ mod tests {
     #[test]
     fn test_save_csv() -> Result<(),IOError> {
         let mut s=Sheet::new();
-        s.metadata.headers=1;
-        s.set_cell(Cell::new("A1", CellValue::Text("Name".to_string())));
-        s.set_cell( Cell::new("B1", CellValue::Text("Value".to_string())));
-        s.set_cell(Cell::new("A2", CellValue::Integer(1)));
-        s.set_cell( Cell::new("B2", CellValue::Integer(2)));
-        s.set_cell(Cell::new("A3", CellValue::Integer(3)));
+        s.cells.metadata.headers=1;
+        s.cells.set_cell(CellID::from_str("A1").unwrap(),Cell::new(CellValue::Text("Name".to_string())));
+        s.cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new(CellValue::Text("Value".to_string())));
+        s.cells.set_cell(CellID::from_str("A2").unwrap(),Cell::new(CellValue::Integer(1)));
+        s.cells.set_cell( CellID::from_str("B2").unwrap(),Cell::new(CellValue::Integer(2)));
+        s.cells.set_cell(CellID::from_str("A3").unwrap(),Cell::new(CellValue::Integer(3)));
        
         let p="workbook.tablr.csv";
         save_csv(&s, &p)?;
@@ -137,12 +138,12 @@ mod tests {
 
         let template = vec![CellValue::Integer(0),CellValue::Integer(0),CellValue::Integer(1)];
         let s2= load_csv(&p, &InputDescription{headers:1, template})?;
-        assert_eq!(s.metadata,s2.metadata);
-        assert_eq!(s.get_cell(&"A1".parse().unwrap()),s2.get_cell(&"A1".parse().unwrap()));
-        assert_eq!(s.get_cell(&"A2".parse().unwrap()),s2.get_cell(&"A2".parse().unwrap()));
-        assert_eq!(s.get_cell(&"A3".parse().unwrap()),s2.get_cell(&"A3".parse().unwrap()));
-        assert_eq!(s.get_cell(&"B1".parse().unwrap()),s2.get_cell(&"B1".parse().unwrap()));
-        assert_eq!(s.get_cell(&"B2".parse().unwrap()),s2.get_cell(&"B2".parse().unwrap()));
+        assert_eq!(s.cells.metadata,s2.cells.metadata);
+        assert_eq!(s.cells.get_cell(&"A1".parse().unwrap()),s2.cells.get_cell(&"A1".parse().unwrap()));
+        assert_eq!(s.cells.get_cell(&"A2".parse().unwrap()),s2.cells.get_cell(&"A2".parse().unwrap()));
+        assert_eq!(s.cells.get_cell(&"A3".parse().unwrap()),s2.cells.get_cell(&"A3".parse().unwrap()));
+        assert_eq!(s.cells.get_cell(&"B1".parse().unwrap()),s2.cells.get_cell(&"B1".parse().unwrap()));
+        assert_eq!(s.cells.get_cell(&"B2".parse().unwrap()),s2.cells.get_cell(&"B2".parse().unwrap()));
         assert!(remove_file(&p).is_ok());
         Ok(())
     }

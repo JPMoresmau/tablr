@@ -247,7 +247,7 @@ fn fold_calculate<N>(nb: &N, args: Vec<CellValue>) -> Result<CellValue, Function
     } else if let Some(m) = float_ret {
         Ok(CellValue::Float(m))
     } else {
-        return Err(FunctionError::WrongNumberOfArgument(0,1));
+        Err(FunctionError::WrongNumberOfArgument(0,1))
     }
 }
 

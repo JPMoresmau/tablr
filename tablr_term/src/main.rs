@@ -140,7 +140,7 @@ fn eval(state: &mut TablrState, c:Command){
         },
         Command::SetFormula(f)=> {
             if f.is_empty(){
-                let ef=state.runtime.workbook.sheets[state.current_sheet].get_cell(&state.current_cell).map(|c| &c.formula);
+                let ef=state.runtime.workbook.sheets[state.current_sheet].cells.get_cell(&state.current_cell).map(|c| &c.dynamic);
                 match ef {
                     Some(Some(s))=>println!("{}",s),
                     _ => println!("No formula"),
@@ -218,7 +218,7 @@ impl TablrState {
 fn print_table(state: &TablrState,or: Option<&SetResult>) {
     let sheet = &state.runtime.workbook.sheets[state.current_sheet];
     let mut table = Table::new();
-    let (mut max_col,mut max_row)= sheet.metadata.size();
+    let (mut max_col,mut max_row)= sheet.cells.metadata.size();
     max_col=max_col.max(10);
     max_row=max_row.max(10);
     
@@ -236,7 +236,7 @@ fn print_table(state: &TablrState,or: Option<&SetResult>) {
         row.push(Cell::new(&format!("{}",r+1)));
         for c in 0..max_col {
             let cid = CellID{row:r,col:c};
-            let cv=sheet.get_cell(&cid).map(|c| &c.value).unwrap_or(&CellValue::Empty);
+            let cv=sheet.cells.get_cell(&cid).map(|c| &c.value).unwrap_or(&CellValue::Empty);
             let mut cell = Cell::new(&cv.to_string());
             if oks.contains(&cid){
                 cell=cell.with_style(Attr::BackgroundColor(color::GREEN))
