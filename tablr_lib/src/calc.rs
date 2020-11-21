@@ -6,7 +6,8 @@ use thiserror::Error;
 use std::fmt;
 use std::ops::Try;
 
-type CellDependencies = HashMap<CellID,HashSet<CellID>>;
+
+type CellDependencies = HashMap<GlobalCellID,HashSet<GlobalCellID>>;
 type FunctionLibrary = HashMap<String, Box<dyn Function>>;
 type FormulaCache =  HashMap<String,Expr>;
 
@@ -77,7 +78,7 @@ impl Runtime {
         let os = self.workbook.sheets.get_mut(sheet_idx);
         match os{
             None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
-            Some(sheet) => SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, id, value, true))
+            Some(sheet) => SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet,GlobalCellID::new(sheet_idx, id), value, true))
         }
     }
 
@@ -101,7 +102,7 @@ impl Runtime {
         match os{
             None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
             Some(sheet) => {
-                set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas, sheet, id, text, formula)
+                set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas,sheet, GlobalCellID::new(sheet_idx,id), text, formula)
             }
         }
     }
@@ -117,27 +118,26 @@ impl Runtime {
         let mut ret = vec![];
         let deps = &mut self.dependencies;
 
-        for sheet in self.workbook.sheets.iter() {
+        for (sheet_idx,sheet) in self.workbook.sheets.iter().enumerate() {
             let mut res= vec![];
-            for (id,cell) in sheet.cells.cells.iter() {
-                if let Some (f) = &cell.dynamic {
-                    if !self.formulas.contains_key(f){
-                        match parse_expr(f){
-                            Ok((rest,expr)) => 
-                                if rest.is_empty() {
-                                    let mut refs=HashSet::new();
-                                    expr.get_references(&mut refs);
-                                    
-                                    refs.iter().for_each(|cid| {deps.entry(*cid).or_insert_with(HashSet::new).insert(*id);});
-                                    self.formulas.insert(f.clone(), expr);
-                                    
-                                } else {
-                                    res.push((id.clone(),Err(EvalError::UnexpectedLeftover(rest.to_string()))));
-                                },
-                            Err(err) =>  res.push((id.clone(),Err(EvalError::IncorrectFormula(format!("{}",err))))),
-                        }
+            for (id,f) in sheet.cells.extras.iter() {
+                if !self.formulas.contains_key(f){
+                    match parse_expr(f){
+                        Ok((rest,expr)) => 
+                            if rest.is_empty() {
+                                let mut refs=HashSet::new();
+                                expr.get_references(&mut refs);
+                                
+                                refs.iter().for_each(|cid| {deps.entry(GlobalCellID::new(sheet_idx,*cid)).or_insert_with(HashSet::new).insert(GlobalCellID::new(sheet_idx,*id));});
+                                self.formulas.insert(f.clone(), expr);
+                                
+                            } else {
+                                res.push((id.clone(),Err(EvalError::UnexpectedLeftover(rest.to_string()))));
+                            },
+                        Err(err) =>  res.push((id.clone(),Err(EvalError::IncorrectFormula(format!("{}",err))))),
                     }
                 }
+                
             }
             ret.push(SetResult::from_ok(res));
         }
@@ -149,7 +149,20 @@ impl Runtime {
         match os{
             None => SetResult::from_error(EvalError::InvalidSheetIndex(sheet_idx)),
             Some(sheet) => {
-                let ocell= sheet.cells.get_cell(&from).map(|c| (c.value.clone(),c.dynamic.clone()));
+                let gto=GlobalCellID::new(sheet_idx,to);
+                if let Some(s) = sheet.cells.get_cell_extra(&from).map(|c|c.clone()){
+                    match parse_cached_expr(&mut self.formulas, &s){
+                        Ok(expr) => set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas,sheet, gto, s, expr.copy(from,to)),
+                        Err(err) =>  SetResult::from_error(err),
+                    }
+                } else {
+                    if let Some(v) = sheet.cells.get_cell_value(&from).map(|c|c.clone()){
+                        SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, gto, v, true))
+                    } else {
+                        SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, gto, CellValue::Empty, true))
+                    }
+                }
+                /*let ocell= sheet.cells.get_cell(&from).map(|c| (c.value.clone(),c.dynamic.clone()));
                 match ocell {
                     None=> SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, to, CellValue::Empty, true)),
                     Some((v,of))=> {
@@ -157,13 +170,13 @@ impl Runtime {
                             None =>SetResult::from_ok(set_sheet_value(&self.functions, &self.dependencies, &self.formulas, sheet, to, v, true)),
                             Some (s)=> {
                                 match parse_cached_expr(&mut self.formulas, &s){
-                                    Ok(expr) => set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas, sheet, to, s.clone(), expr.copy(from,to)),
+                                    Ok(expr) => set_formula_with_text(&self.functions, &mut self.dependencies, &self.formulas,sheet_idx, sheet, to, s.clone(), expr.copy(from,to)),
                                     Err(err) =>  SetResult::from_error(err),
                                 }
                             }
                         }
                     },
-                }
+                }*/
 
             },
         }
@@ -195,25 +208,27 @@ fn parse_cached_expr(formulas: &mut FormulaCache,formula: &str ) -> Result<Expr,
 
 } 
 
-pub fn set_formula_with_text(functions: &FunctionLibrary, dependencies: &mut CellDependencies, formulas: &FormulaCache, sheet: &mut Sheet, id: CellID, text: String, formula: Expr) -> SetResult {
+pub fn set_formula_with_text(functions: &FunctionLibrary, dependencies: &mut CellDependencies, formulas: &FormulaCache, sheet: &mut Sheet, id: GlobalCellID, text: String, formula: Expr) -> SetResult {
     
-    runtime_check(formulas,sheet, id, &formula)?;
+    runtime_check(formulas,sheet, id.cell_id, &formula)?;
 
-    let e=sheet.cells.cells.entry(id)
-        .or_insert(Cell{value:CellValue::Empty,dynamic:None});
-    if let Some(oldt) = e.dynamic.take() {
+
+    //let e=sheet.cells.cells.entry(id)
+    //    .or_insert(Cell{value:CellValue::Empty,dynamic:None});
+    if let Some(oldt) = sheet.cells.unset_cell_extra(&id.cell_id) {
         if let Some(olde) = formulas.get(&oldt){
             let mut orefs=HashSet::new();
             olde.get_references(&mut orefs);
-            orefs.iter().for_each(|cid| {dependencies.get_mut(cid).map(|v| v.remove(&id));}
+            orefs.iter().for_each(|cid| {dependencies.get_mut(&id.set_cell(*cid)).map(|v| v.remove(&id));}
                 );
         }
     }
-    e.dynamic=Some(text);
+    sheet.cells.set_cell_extra(id.cell_id, text);
+    //e.dynamic=Some(text);
     
     let mut refs=HashSet::new();
     formula.get_references(&mut refs);
-    refs.iter().for_each(|cid| {dependencies.entry(*cid).or_insert_with(HashSet::new).insert(id);});
+    refs.iter().for_each(|cid| {dependencies.entry(id.set_cell(*cid)).or_insert_with(HashSet::new).insert(id);});
 
     let new_value =runtime_sheet_eval(functions, sheet, &formula)?;
 
@@ -221,26 +236,26 @@ pub fn set_formula_with_text(functions: &FunctionLibrary, dependencies: &mut Cel
 
 }
 
-fn set_sheet_value(functions: &FunctionLibrary, dependencies: &CellDependencies, formulas: &FormulaCache, sheet: &mut Sheet, id: CellID, value: CellValue, remove_formula: bool) -> Vec<(CellID,Result<CellValue,EvalError>)>{
+fn set_sheet_value(functions: &FunctionLibrary, dependencies: &CellDependencies, formulas: &FormulaCache, sheet: &mut Sheet, id: GlobalCellID, value: CellValue, remove_formula: bool) -> Vec<(CellID,Result<CellValue,EvalError>)>{
     let mut ret =vec![];
     if remove_formula {
-        let c=Cell{value:value.clone(),dynamic:None};
-        sheet.cells.set_cell(id,c);
-    } else {
-        sheet.cells.set_cell_value(&id, value.clone(), None);
-    }
+        //let c=Cell{value:value.clone(),dynamic:None};
+        sheet.cells.unset_cell_extra(&id.cell_id);
+    } 
+    sheet.cells.set_cell_value(id.cell_id, value.clone());
+    ret.push((id.cell_id,Ok(value)));
     
-    ret.push((id,Ok(value)));
-
+   
     if let Some(hs) = dependencies.get(&id){
         for c in hs.iter().flat_map(|cid| {
-            if let Some(c) = sheet.cells.cells.get(cid){
-                if let Some(f) = &c.dynamic {
+            if cid.test_idx.is_none() {
+            //if let Some(c) = sheet.get_cell(cid){
+                if let Some(f) =sheet.cells.get_cell_extra(&cid.cell_id) {
                     if let Some(e)=formulas.get(f){
                         let r =runtime_sheet_eval(functions, sheet, e);
                         match r {
                             Ok(cv) => return set_sheet_value(functions, dependencies, formulas, sheet, *cid, cv, false),
-                            Err(ee) => return vec![(*cid,Err(ee))],
+                            Err(ee) => return vec![(cid.cell_id,Err(ee))],
                         }
                     }
                 }
@@ -320,7 +335,7 @@ fn runtime_check(formula_cache: &FormulaCache, sheet: &Sheet, id: CellID, expr: 
 }
 
 fn cycle_check(formula_cache: &FormulaCache, sheet: &Sheet, id: &CellID, previous_ids: &mut Vec<CellID>) -> Result<(),EvalError> {
-    if let Some(Some(f)) = sheet.cells.get_cell(id).map(|c| &c.dynamic){
+    if let Some(f) = sheet.cells.get_cell_extra(id){
         if let Some(expr) = formula_cache.get(f){
             let mut s:HashSet<CellID> = HashSet::new();
             expr.get_references(&mut s);
@@ -411,10 +426,10 @@ mod tests {
         let mut r=Runtime::new();
 
         let id = CellID::from_str("A1").unwrap();
-        let c = Cell{value:CellValue::Integer(1),dynamic:None};
+        //let c = Cell::ProdCell{value:CellValue::Integer(1),formula:None};
         
 
-        r.workbook.sheets[0].cells.set_cell(id, c);
+        r.workbook.sheets[0].cells.set_cell_value(id, CellValue::Integer(1));
         assert_eq!(CellValue::Integer(1),r.workbook.sheets[0].cells.cell_value(&id));
         assert_eq!(Ok(CellValue::Integer(1)),r.eval(0, &Expr::Reference(id)));
     }
@@ -423,9 +438,11 @@ mod tests {
     fn test_range_expr() {
         let mut r=Runtime::new();
 
-        let id1 = r.workbook.sheets[0].cells.set_cell( CellID::from_str("A1").unwrap(),Cell::new(CellValue::Integer(1)));
+        let id1 = CellID::from_str("A1").unwrap();
+        r.workbook.sheets[0].cells.set_cell_value(id1 ,CellValue::Integer(1));
 
-        let id2 = r.workbook.sheets[0].cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new(CellValue::Integer(2)));
+        let id2 = CellID::from_str("B1").unwrap();
+        r.workbook.sheets[0].cells.set_cell_value( id2,CellValue::Integer(2));
         let r1=CellRange{from:id1,to:id2};
         let r2=CellRange{from:id1,to:CellID::from_str("C1").unwrap()};
         assert_eq!(vec![CellValue::Integer(1),CellValue::Integer(2)],r.workbook.sheets[0].cells.range_values(&r2));
@@ -437,9 +454,11 @@ mod tests {
     fn test_function_expr(){
         let mut r=Runtime::new();
 
-        let id1 = r.workbook.sheets[0].cells.set_cell(CellID::from_str("A1").unwrap(),Cell::new(CellValue::Integer(1)));
+        let id1 = CellID::from_str("A1").unwrap();
+        r.workbook.sheets[0].cells.set_cell_value(id1,CellValue::Integer(1));
 
-        let id2 = r.workbook.sheets[0].cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new(CellValue::Integer(2)));
+        let id2 = CellID::from_str("B1").unwrap();
+        r.workbook.sheets[0].cells.set_cell_value(id2 ,CellValue::Integer(2));
 
         assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Reference(id1),Expr::Reference(id2)]}));
         assert_eq!(Ok(CellValue::Integer(3)),r.eval(0, &Expr::Function{name:"SUM".to_string(),args:vec![Expr::Range(CellRange{from:id1,to:id2})]}));
@@ -494,17 +513,22 @@ mod tests {
         let id3 = CellID::from_str("A3").unwrap();
         r.set_formula_str(0, id3, "SUM(A1,A2)")?;
         
+        let gid1=GlobalCellID::new(0, id1);
+        let gid2=GlobalCellID::new(0, id2);
+        let gid3=GlobalCellID::new(0, id3);
+        
+
         assert_eq!(1,r.formulas.len());
         assert!(r.formulas.contains_key("SUM(A1,A2)"));
-        assert_eq!(Some(&[id3].iter().cloned().collect()),r.dependencies.get(&id1));
-        assert_eq!(Some(&[id3].iter().cloned().collect()),r.dependencies.get(&id2));
+        assert_eq!(Some(&[gid3].iter().cloned().collect()),r.dependencies.get(&gid1));
+        assert_eq!(Some(&[gid3].iter().cloned().collect()),r.dependencies.get(&gid2));
 
         let mut r2=Runtime::new();
         r2.load(r.workbook.clone());
         assert_eq!(1,r2.formulas.len());
         assert!(r2.formulas.contains_key("SUM(A1,A2)"));
-        assert_eq!(Some(&[id3].iter().cloned().collect()),r2.dependencies.get(&id1));
-        assert_eq!(Some(&[id3].iter().cloned().collect()),r2.dependencies.get(&id2));
+        assert_eq!(Some(&[gid3].iter().cloned().collect()),r2.dependencies.get(&gid1));
+        assert_eq!(Some(&[gid3].iter().cloned().collect()),r2.dependencies.get(&gid2));
 
         Ok(())
     }

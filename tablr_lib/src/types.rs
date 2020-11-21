@@ -155,22 +155,37 @@ impl FromStr for CellID {
 }*/
 
 #[derive(Clone, PartialOrd, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Cell<T> {
-    //pub id: CellID,
-    pub value: CellValue,
-    pub dynamic: T,
+pub enum Cell {
+    ProdCell{
+        value: CellValue,
+        formula: Option<String>,
+    },
+    TestCell {
+        value: CellValue,
+        expected: CellValue,
+    },
 }
 
-pub type ProdCell = Cell<Option<String>>;
-pub type TestCell = Cell<CellValue>;
+impl Cell {
+    pub fn new(value:CellValue) -> Self {
+        Cell::ProdCell{value,formula:None}
+    }
 
-impl ProdCell {
-    //id: &str,
-    //id: CellID::from_str(id).unwrap(), 
-    pub fn new(value: CellValue) -> ProdCell {
-        Cell{value,dynamic:None}
+    pub fn get_value<'a>(&'a self) -> &'a CellValue {
+        match self {
+            Cell::ProdCell{value,formula:_}=>value,
+            Cell::TestCell{value,expected:_}=>value,
+        }
+    }
+
+    pub fn set_value(&mut self, val: CellValue) {
+        match self {
+            Cell::ProdCell{ref mut value,formula:_}=>*value=val,
+            Cell::TestCell{ref mut value,expected:_}=>*value=val,
+        }
     }
 }
+
 /*
 impl CellIDOwner for Cell {
     fn id(&self) -> CellID { 
@@ -340,26 +355,59 @@ impl FromStr for CellRange {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CellMap<T>{
     pub metadata: Metadata,
-    pub cells: HashMap<CellID,Cell<T>>,
+    pub values: HashMap<CellID,CellValue>,
+    pub extras: HashMap<CellID,T>,
 }
 
 impl <T> CellMap<T> {
-    pub fn get_cell<'a>(&'a self, id: &CellID ) -> Option<&'a Cell<T>> {
-        self.cells.get(id)
+    pub fn get_cell_value<'a>(&'a self, id: &CellID ) -> Option<&'a CellValue> {
+        self.values.get(id)
     }
 
-    pub fn set_cell_value(&mut self, id: &CellID, value: CellValue, dynamic: T) {
+    pub fn get_cell_extra<'a>(&'a self, id: &CellID ) -> Option<&'a T> {
+        self.extras.get(id)
+    }
+
+
+    pub fn set_cell_value(&mut self, id: CellID, value: CellValue) {
+        //let myid=*id;
+        //self.cells.entry(*id).or_insert(Cell{value:CellValue::Empty,dynamic}).value=value;
+        self.values.insert(id,value);
+        self.calc_size(&id);
+    }
+
+    pub fn unset_cell_value(&mut self, id: &CellID) -> Option<CellValue> {
+        //let myid=*id;
+        //self.cells.entry(*id).or_insert(Cell{value:CellValue::Empty,dynamic}).value=value;
+        self.values.remove(id)
+    }
+
+    pub fn set_cell_extra(&mut self, id: CellID, extra: T) {
+        //let myid=*id;
+        //self.cells.entry(*id).or_insert(Cell{value:CellValue::Empty,dynamic}).value=value;
+        self.extras.insert(id,extra);
+        self.calc_size(&id);
+    }
+
+    pub fn unset_cell_extra(&mut self, id: &CellID) -> Option<T> {
+        //let myid=*id;
+        //self.cells.entry(*id).or_insert(Cell{value:CellValue::Empty,dynamic}).value=value;
+        self.extras.remove(id)
+    }
+
+
+    /*pub fn set_cell_value(&mut self, id: &CellID, value: CellValue, dynamic: T) {
         //let myid=*id;
         self.cells.entry(*id).or_insert(Cell{value:CellValue::Empty,dynamic}).value=value;
         self.calc_size(id);
-    }
+    }*/
 
-    pub fn set_cell(&mut self, id: CellID, cell: Cell<T>) -> CellID {
+    /*pub fn set_cell(&mut self, id: CellID, cell: Cell) -> CellID {
         //let id = cell.id;
         self.cells.insert(id.clone(),cell);
         self.calc_size(&id);
         id
-    }
+    }*/
 
     fn calc_size(&mut self, id: &CellID) {
         let sd=self.metadata.size();
@@ -378,7 +426,7 @@ impl <T> CellMap<T> {
 
     
     pub fn cell_value(&self, id: &CellID) -> CellValue {
-        self.get_cell(id).map(|c| c.value.clone()).unwrap_or(CellValue::Empty)
+        self.get_cell_value(id).map(|c| c.clone()).unwrap_or(CellValue::Empty)
     }
 
     pub fn range_values(&self, range: &CellRange) -> Vec<CellValue> {
@@ -386,9 +434,27 @@ impl <T> CellMap<T> {
     }
 }
 
-pub type ProdCellMap = CellMap<Option<String>>;
+pub type ProdCellMap = CellMap<String>;
 pub type TestCellMap = CellMap<CellValue>;
 
+/*
+impl ProdCellMap {
+   
+    pub fn set_cell_value(&mut self, id: &CellID, value: CellValue, formula: Option<String>) {
+        //let myid=*id;
+        self.cells.entry(*id).or_insert(Cell::ProdCell{value:CellValue::Empty,formula}).set_value(value);
+        self.calc_size(id);
+    }
+}
+
+impl TestCellMap {
+   
+    pub fn set_cell_value(&mut self, id: &CellID, value: CellValue, expected: CellValue) {
+        //let myid=*id;
+        self.cells.entry(*id).or_insert(Cell::TestCell{value:CellValue::Empty,expected}).set_value(value);
+        self.calc_size(id);
+    }
+}*/
 
 /*
 impl<T:Serialize> Serialize for CellMap<T>{
@@ -434,21 +500,47 @@ impl<'de, T:CellIDOwner + Deserialize<'de>> Deserialize<'de> for CellMap<T> {
     }
 }*/
 
+
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
+pub struct GlobalCellID {
+    pub sheet_idx: usize,
+    pub test_idx: Option<usize>,
+    pub cell_id: CellID,
+}
+
+impl GlobalCellID {
+    pub fn new(sheet_idx: usize, cell_id: CellID)-> GlobalCellID {
+        Self {sheet_idx,test_idx:None, cell_id}
+    }
+    pub fn new_test(sheet_idx: usize, test_idx: usize, cell_id: CellID)-> GlobalCellID {
+        Self {sheet_idx,test_idx:Some(test_idx), cell_id}
+    }
+    
+    pub fn set_cell(&self, cell_id: CellID)-> GlobalCellID {
+        Self {sheet_idx:self.sheet_idx,test_idx:self.test_idx, cell_id}
+    }
+}
+
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Sheet {
     pub cells:ProdCellMap,
-    pub tests:HashMap<String,TestCellMap>,
+    pub tests:Vec<TestCellMap>,
 }
 
 impl Sheet {
     pub fn new()-> Self {
         Sheet{
-            cells: CellMap{metadata: Metadata::new(),cells:HashMap::new()},
-            tests: HashMap::new(),
+            cells: CellMap{metadata: Metadata::new(),values:HashMap::new(),extras:HashMap::new()},
+            tests:Vec::new(),
         }
     }
 
-    
+    pub fn get_cell_value<'a>(&'a self, id: GlobalCellID) -> Option<&'a CellValue> {
+        match id.test_idx {
+            None=> self.cells.get_cell_value(&id.cell_id),
+            Some(idx)=>self.tests[idx].get_cell_value(&id.cell_id),
+        }
+    }
 }
 
 impl Default for Sheet {
@@ -471,6 +563,11 @@ impl Workbook {
         self.sheets.push(Sheet::new());
         self.sheets.len()-1
     } 
+
+    pub fn get_cell_value<'a,T>(&'a self, id: GlobalCellID) -> Option<&'a CellValue> {
+        let s = &self.sheets[id.sheet_idx];
+        s.get_cell_value(id)
+    }
 }
 
 impl Default for Workbook {
@@ -580,15 +677,15 @@ mod tests {
     fn test_sheet_size() {
         let mut s=Sheet::new();
         assert_eq!((0,0),s.cells.metadata.size());
-        s.cells.set_cell(CellID::from_str("A1").unwrap(), Cell::new(CellValue::Text("Name".to_string())));
+        s.cells.set_cell_value(CellID::from_str("A1").unwrap(), CellValue::Text("Name".to_string()));
         assert_eq!((1,1),s.cells.metadata.size());
-        s.cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new( CellValue::Text("Value".to_string())));
+        s.cells.set_cell_value( CellID::from_str("B1").unwrap(), CellValue::Text("Value".to_string()));
         assert_eq!((2,1),s.cells.metadata.size());
-        s.cells.set_cell(CellID::from_str("A2").unwrap(),Cell::new(CellValue::Integer(1)));
+        s.cells.set_cell_value(CellID::from_str("A2").unwrap(),CellValue::Integer(1));
         assert_eq!((2,2),s.cells.metadata.size());
-        s.cells.set_cell( CellID::from_str("B2").unwrap(),Cell::new(CellValue::Integer(2)));
+        s.cells.set_cell_value( CellID::from_str("B2").unwrap(),CellValue::Integer(2));
         assert_eq!((2,2),s.cells.metadata.size());
-        s.cells.set_cell(CellID::from_str("A3").unwrap(),Cell::new(CellValue::Integer(3)));
+        s.cells.set_cell_value(CellID::from_str("A3").unwrap(),CellValue::Integer(3));
         assert_eq!((2,3),s.cells.metadata.size());
 
     }

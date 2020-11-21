@@ -19,7 +19,7 @@ The world runs on spreadsheets it seems, so here's another take at writing a spr
 ## TODO
 
 - Support test: the library supports having test cells, but nothing is implemented yet. The idea is to be able to have copies of sheets where you cannot change formulas, but you can put values in cell and indicate which values should the formula yield, kind of built in unit tests for your spreadsheet
-
+- Convert values in given range to given type (with options) like text to number of date 
 
 
 ## Getting started

@@ -1,5 +1,5 @@
 use crate::types::*;
-use std::fs::File;
+use std::{fs::File};
 use std::fmt::Display;
 use std::io::{BufReader, BufWriter,Write};
 use std::path::Path;
@@ -50,8 +50,8 @@ pub fn save_csv_writer<W: Write>(sheet: &Sheet, w: W) -> Result<(),IOError> {
     for r in 0..sheet.cells.metadata.size().1 {
         row.clear();
         for c in 0..sheet.cells.metadata.size().0 {
-            row.push(match sheet.cells.cells.get(&CellID{col:c,row:r}) {
-                Some(cell) =>format!("{}",cell.value),
+            row.push(match sheet.cells.get_cell_value(&CellID{col:c,row:r}) {
+                Some(v) =>format!("{}",v),
                 None =>String::new(),
             });
         }
@@ -90,7 +90,7 @@ pub fn load_csv<P: AsRef<Path>+Display>(path:&P, desc: &InputDescription) -> Res
                 
                 template_value.parse_similar(field).map_err(|e| IOError::ParseCSVFieldError(id,e))?
             };
-            sheet.cells.set_cell_value(&id, cell_value, None);
+            sheet.cells.set_cell_value(id, cell_value);
         }
     }
     Ok(sheet)
@@ -107,10 +107,10 @@ mod tests {
     #[test]
     fn test_save_load()-> Result<(),IOError> {
         let mut w=Workbook::new();
-        w.sheets[0].cells.set_cell(CellID::from_str("A1").unwrap(),Cell::new(CellValue::Text("Name".to_string())));
-        w.sheets[0].cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new(CellValue::Text("Value".to_string())));
-        w.sheets[0].cells.set_cell(CellID::from_str("A2").unwrap(),Cell::new(CellValue::Integer(1)));
-        w.sheets[0].cells.set_cell( CellID::from_str("B2").unwrap(),Cell::new(CellValue::Integer(2)));
+        w.sheets[0].cells.set_cell_value(CellID::from_str("A1").unwrap(),CellValue::Text("Name".to_string()));
+        w.sheets[0].cells.set_cell_value( CellID::from_str("B1").unwrap(),CellValue::Text("Value".to_string()));
+        w.sheets[0].cells.set_cell_value(CellID::from_str("A2").unwrap(),CellValue::Integer(1));
+        w.sheets[0].cells.set_cell_value( CellID::from_str("B2").unwrap(),CellValue::Integer(2));
         w.sheets[0].cells.metadata.headers=1;
 
         let p="workbook.tablr.json";
@@ -125,11 +125,11 @@ mod tests {
     fn test_save_csv() -> Result<(),IOError> {
         let mut s=Sheet::new();
         s.cells.metadata.headers=1;
-        s.cells.set_cell(CellID::from_str("A1").unwrap(),Cell::new(CellValue::Text("Name".to_string())));
-        s.cells.set_cell( CellID::from_str("B1").unwrap(),Cell::new(CellValue::Text("Value".to_string())));
-        s.cells.set_cell(CellID::from_str("A2").unwrap(),Cell::new(CellValue::Integer(1)));
-        s.cells.set_cell( CellID::from_str("B2").unwrap(),Cell::new(CellValue::Integer(2)));
-        s.cells.set_cell(CellID::from_str("A3").unwrap(),Cell::new(CellValue::Integer(3)));
+        s.cells.set_cell_value(CellID::from_str("A1").unwrap(),CellValue::Text("Name".to_string()));
+        s.cells.set_cell_value( CellID::from_str("B1").unwrap(),CellValue::Text("Value".to_string()));
+        s.cells.set_cell_value(CellID::from_str("A2").unwrap(),CellValue::Integer(1));
+        s.cells.set_cell_value( CellID::from_str("B2").unwrap(),CellValue::Integer(2));
+        s.cells.set_cell_value(CellID::from_str("A3").unwrap(),CellValue::Integer(3));
        
         let p="workbook.tablr.csv";
         save_csv(&s, &p)?;
@@ -139,11 +139,11 @@ mod tests {
         let template = vec![CellValue::Integer(0),CellValue::Integer(0),CellValue::Integer(1)];
         let s2= load_csv(&p, &InputDescription{headers:1, template})?;
         assert_eq!(s.cells.metadata,s2.cells.metadata);
-        assert_eq!(s.cells.get_cell(&"A1".parse().unwrap()),s2.cells.get_cell(&"A1".parse().unwrap()));
-        assert_eq!(s.cells.get_cell(&"A2".parse().unwrap()),s2.cells.get_cell(&"A2".parse().unwrap()));
-        assert_eq!(s.cells.get_cell(&"A3".parse().unwrap()),s2.cells.get_cell(&"A3".parse().unwrap()));
-        assert_eq!(s.cells.get_cell(&"B1".parse().unwrap()),s2.cells.get_cell(&"B1".parse().unwrap()));
-        assert_eq!(s.cells.get_cell(&"B2".parse().unwrap()),s2.cells.get_cell(&"B2".parse().unwrap()));
+        assert_eq!(s.cells.get_cell_value(&"A1".parse().unwrap()),s2.cells.get_cell_value(&"A1".parse().unwrap()));
+        assert_eq!(s.cells.get_cell_value(&"A2".parse().unwrap()),s2.cells.get_cell_value(&"A2".parse().unwrap()));
+        assert_eq!(s.cells.get_cell_value(&"A3".parse().unwrap()),s2.cells.get_cell_value(&"A3".parse().unwrap()));
+        assert_eq!(s.cells.get_cell_value(&"B1".parse().unwrap()),s2.cells.get_cell_value(&"B1".parse().unwrap()));
+        assert_eq!(s.cells.get_cell_value(&"B2".parse().unwrap()),s2.cells.get_cell_value(&"B2".parse().unwrap()));
         assert!(remove_file(&p).is_ok());
         Ok(())
     }
